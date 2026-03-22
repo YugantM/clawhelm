@@ -1,7 +1,17 @@
 import { useState } from "react";
 import Message from "./Message";
 
-export default function Chat({ messages, pending, onSend, selectedInsightId, onSelectInsight, modeLabel }) {
+export default function Chat({
+  messages,
+  pending,
+  onSend,
+  selectedInsightId,
+  onSelectInsight,
+  modeLabel,
+  chatMode,
+  onChatModeChange,
+  sessionId,
+}) {
   const [input, setInput] = useState("");
 
   async function handleSubmit(event) {
@@ -32,10 +42,37 @@ export default function Chat({ messages, pending, onSend, selectedInsightId, onS
               ? "Send prompts directly from this browser using your own provider key."
               : modeLabel === "Demo"
                 ? "Bundled sample conversation mode for the public demo."
-                : "Send prompts through the same OpenAI-compatible proxy the rest of the system uses."}
+                : chatMode === "cloud"
+                  ? "Cloud chat mode uses the /chat session endpoint with persistent session ids."
+                  : "Local mode sends prompts through the OpenAI-compatible proxy endpoint."}
           </p>
         </div>
+        {modeLabel === "Proxy" ? (
+          <div className="chat-mode-switch" role="tablist" aria-label="Chat runtime mode">
+            <button
+              type="button"
+              className={chatMode === "local" ? "chat-mode-switch__button chat-mode-switch__button--active" : "chat-mode-switch__button"}
+              onClick={() => onChatModeChange("local")}
+            >
+              Local Mode
+            </button>
+            <button
+              type="button"
+              className={chatMode === "cloud" ? "chat-mode-switch__button chat-mode-switch__button--active" : "chat-mode-switch__button"}
+              onClick={() => onChatModeChange("cloud")}
+            >
+              Cloud Mode
+            </button>
+          </div>
+        ) : null}
       </div>
+
+      {modeLabel === "Proxy" && chatMode === "cloud" ? (
+        <div className="chat-session-meta">
+          <span>Session</span>
+          <strong>{sessionId}</strong>
+        </div>
+      ) : null}
 
       <div className="chat-thread">
         {messages.length === 0 ? (

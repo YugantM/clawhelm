@@ -5,11 +5,20 @@ from contextlib import asynccontextmanager
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from .cloud.memory import memory_store
+from .config.feature_flags import (
+    ENABLE_CLOUD_MODE,
+    ENABLE_MEMORY,
+    ENABLE_PREMIUM_ROUTING,
+    ENABLE_STYLE_LAYER,
+    ENV_MODE,
+    is_cloud_mode,
+)
 from .db import db
-from .models import LogEntry, ProviderApiKeyUpdate, ProviderConfigResponse, StatsResponse
+from .models import ChatRequest, LogEntry, ProviderApiKeyUpdate, ProviderConfigResponse, SessionResponse, StatsResponse
 from .models_registry import model_registry
 from .proxy import forward_chat_completion
 from .settings import settings_store
@@ -50,6 +59,12 @@ async def chat_completions(request: Request):
     return await forward_chat_completion(request, client)
 
 
+@app.post("/chat")
+async def chat(request: Request, payload: ChatRequest):
+    client: httpx.AsyncClient = request.app.state.http_client
+    return await forward_chat_completion(request, client)
+
+
 @app.get("/logs", response_model=list[LogEntry])
 async def get_logs():
     return await db.get_recent_logs(limit=50)
@@ -58,6 +73,16 @@ async def get_logs():
 @app.get("/stats", response_model=StatsResponse)
 async def get_stats():
     return await db.get_stats()
+
+
+@app.get("/session/{session_id}", response_model=SessionResponse)
+async def get_session(session_id: str):
+    if not (is_cloud_mode() and ENABLE_CLOUD_MODE and ENABLE_MEMORY):
+        raise HTTPException(status_code=404, detail="Session API is only available in cloud mode")
+    session = await memory_store.get_session_payload(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
 
 
 @app.get("/config/providers", response_model=ProviderConfigResponse)
@@ -88,6 +113,12 @@ async def health():
     return {
         "status": "ok",
         "service": "clawhelm",
+        "env_mode": ENV_MODE,
+        "cloud_mode": is_cloud_mode(),
+        "enable_cloud_mode": ENABLE_CLOUD_MODE,
+        "enable_memory": ENABLE_MEMORY,
+        "enable_style_layer": ENABLE_STYLE_LAYER,
+        "enable_premium_routing": ENABLE_PREMIUM_ROUTING,
         "provider_base_url": os.getenv("PROVIDER_BASE_URL", "https://api.openai.com"),
         "openrouter_enabled": os.getenv("ENABLE_OPENROUTER", "false").lower() == "true",
         "allow_openai_routing": os.getenv("ALLOW_OPENAI_ROUTING", "true").lower() == "true",

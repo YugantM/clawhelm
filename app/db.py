@@ -7,9 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .config.feature_flags import ENABLE_PREMIUM_ROUTING, is_cloud_mode
 from .costs import estimate_cost_saved_for_free_request
 from .models import LogEntry
-from .performance import get_performance_by_model
+from .services.performance import get_performance_by_model
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "clawhelm.db"
 DB_PATH = Path(os.getenv("CLAWHELM_DB_PATH", str(DEFAULT_DB_PATH))).expanduser().resolve()
@@ -34,6 +35,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
+                    session_id TEXT,
                     request_source TEXT,
                     original_model TEXT,
                     selected_model TEXT,
@@ -55,6 +57,7 @@ class Database:
                 """
             )
             self._ensure_column(connection, "original_model", "TEXT")
+            self._ensure_column(connection, "session_id", "TEXT")
             self._ensure_column(connection, "request_source", "TEXT")
             self._ensure_column(connection, "selected_model", "TEXT")
             self._ensure_column(connection, "actual_model", "TEXT")
@@ -112,6 +115,7 @@ class Database:
     async def insert_log(
         self,
         *,
+        session_id: str | None,
         request_source: str | None,
         original_model: str | None,
         selected_model: str | None,
@@ -132,6 +136,7 @@ class Database:
     ) -> None:
         await asyncio.to_thread(
             self._insert_log_sync,
+            session_id,
             request_source,
             original_model,
             selected_model,
@@ -153,6 +158,7 @@ class Database:
 
     def _insert_log_sync(
         self,
+        session_id: str | None,
         request_source: str | None,
         original_model: str | None,
         selected_model: str | None,
@@ -176,6 +182,7 @@ class Database:
                 """
                 INSERT INTO logs (
                     timestamp,
+                    session_id,
                     request_source,
                     original_model,
                     selected_model,
@@ -194,10 +201,11 @@ class Database:
                     total_tokens,
                     estimated_cost
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.now(timezone.utc).isoformat(),
+                    session_id,
                     request_source,
                     original_model,
                     selected_model,
@@ -230,6 +238,7 @@ class Database:
                 SELECT
                     id,
                     timestamp,
+                    session_id,
                     request_source,
                     original_model,
                     selected_model,
@@ -315,15 +324,18 @@ class Database:
 
     @staticmethod
     def _get_candidate_scores() -> list[dict[str, Any]]:
-        from .router import get_ranked_candidate_snapshot
+        if is_cloud_mode() and ENABLE_PREMIUM_ROUTING:
+            from .cloud.premium_router import get_ranked_candidate_snapshot
 
-        return get_ranked_candidate_snapshot()
+            return get_ranked_candidate_snapshot()
+        return []
 
     @staticmethod
     def _row_to_log_entry(row: sqlite3.Row) -> LogEntry:
         return LogEntry(
             id=row["id"],
             timestamp=datetime.fromisoformat(row["timestamp"]),
+            session_id=row["session_id"],
             request_source=row["request_source"],
             original_model=row["original_model"],
             selected_model=row["selected_model"],

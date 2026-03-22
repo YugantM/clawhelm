@@ -9,6 +9,7 @@ from pydantic import BaseModel
 class LogEntry(BaseModel):
     id: int
     timestamp: datetime
+    session_id: str | None
     request_source: str | None
     original_model: str | None
     selected_model: str | None
@@ -58,3 +59,18 @@ class ProviderConfigResponse(BaseModel):
 
 class ProviderApiKeyUpdate(BaseModel):
     api_key: str = ""
+
+
+class ChatRequest(BaseModel):
+    model: str | None = None
+    message: str | None = None
+    messages: list[dict[str, Any]] | None = None
+    session_id: str | None = None
+
+
+class SessionResponse(BaseModel):
+    session_id: str
+    messages: list[dict[str, Any]]
+    style_profile: dict[str, Any]
+    metadata: dict[str, Any]
+    summary: str | None = None

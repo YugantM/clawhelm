@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getHealth, getLogs, getProviderConfig, getStats, postChat, postChatByok, updateOpenRouterApiKey } from "./api";
+import { getHealth, getLogs, getProviderConfig, getStats, postChat, postChatByok, postCloudChat, updateOpenRouterApiKey } from "./api";
 import { DEMO_MODE } from "./demoData";
 import ChatPage from "./pages/ChatPage";
 import Dashboard from "./pages/Dashboard";
@@ -14,6 +14,8 @@ const STORAGE_KEYS = {
   byokProvider: "clawhelm_byok_provider",
   byokApiKey: "clawhelm_byok_api_key",
   byokModel: "clawhelm_byok_model",
+  chatMode: "clawhelm_chat_mode",
+  cloudSessionId: "clawhelm_cloud_session_id",
 };
 
 function getTabFromHash() {
@@ -47,6 +49,33 @@ function getInitialByokConfig() {
 
 function createMessage(id, role, content, insight = null) {
   return { id, role, content, insight };
+}
+
+function createSessionId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function getInitialChatMode() {
+  if (typeof window === "undefined") {
+    return "local";
+  }
+  return window.localStorage.getItem(STORAGE_KEYS.chatMode) || "local";
+}
+
+function getInitialCloudSessionId() {
+  if (typeof window === "undefined") {
+    return createSessionId();
+  }
+  const existing = window.localStorage.getItem(STORAGE_KEYS.cloudSessionId);
+  if (existing) {
+    return existing;
+  }
+  const sessionId = createSessionId();
+  window.localStorage.setItem(STORAGE_KEYS.cloudSessionId, sessionId);
+  return sessionId;
 }
 
 function normalizeAssistantContent(response, latestInsight) {
@@ -120,6 +149,32 @@ async function waitForLatestLog(previousTopLogId, retries = 8, delayMs = 350) {
   }
 
   return getLogs({ useDemo: false });
+}
+
+async function waitForSessionLog(sessionId, previousTopLogId, retries = 8, delayMs = 350) {
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    let logsData = [];
+    try {
+      logsData = await getLogs({ useDemo: false });
+    } catch {
+      logsData = [];
+    }
+
+    const matchingLog = logsData.find((entry) => entry.session_id === sessionId && entry.id !== previousTopLogId) || null;
+    if (matchingLog) {
+      return { logsData, matchingLog };
+    }
+
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, delayMs);
+    });
+  }
+
+  const logsData = await getLogs({ useDemo: false });
+  return {
+    logsData,
+    matchingLog: logsData.find((entry) => entry.session_id === sessionId && entry.id !== previousTopLogId) || null,
+  };
 }
 
 function buildByokInsight({ response, provider, model, prompt, startedAt, fallbackUsed = false, statusCode = 200 }) {
@@ -306,6 +361,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState(getTabFromHash);
   const [publicMode, setPublicMode] = useState(getInitialPublicMode);
   const [byokConfig, setByokConfig] = useState(getInitialByokConfig);
+  const [chatMode, setChatMode] = useState(getInitialChatMode);
+  const [cloudSessionId, setCloudSessionId] = useState(getInitialCloudSessionId);
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState(null);
   const [health, setHealth] = useState(null);
@@ -329,6 +386,17 @@ export default function App() {
     if (typeof window === "undefined") return;
     window.sessionStorage.setItem(STORAGE_KEYS.publicMode, publicMode);
   }, [publicMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(STORAGE_KEYS.chatMode, chatMode);
+  }, [chatMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!cloudSessionId) return;
+    window.localStorage.setItem(STORAGE_KEYS.cloudSessionId, cloudSessionId);
+  }, [cloudSessionId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -472,6 +540,49 @@ export default function App() {
         return;
       }
 
+      if (!useDemoData && chatMode === "cloud") {
+        const sessionId = cloudSessionId || createSessionId();
+        if (sessionId !== cloudSessionId) {
+          setCloudSessionId(sessionId);
+        }
+
+        const response = await postCloudChat({ message: prompt, sessionId }, { useDemo: false });
+        const optimisticAssistantContent = normalizeAssistantContent(response, null);
+        setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", optimisticAssistantContent, null)]);
+
+        try {
+          const { logsData, matchingLog } = await waitForSessionLog(sessionId, previousTopLogId);
+          setLogs(logsData);
+          try {
+            const [statsData, healthData] = await Promise.all([getStats({ useDemo: false }), getHealth({ useDemo: false })]);
+            setStats(statsData);
+            setHealth(healthData);
+            setSystemWarning("");
+          } catch (statsError) {
+            setSystemWarning(statsError.message || "Metrics refresh delayed");
+          }
+
+          const latestInsight = matchingLog || null;
+          const resolvedAssistantContent = normalizeAssistantContent(response, latestInsight);
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === assistantMessageId
+                ? { ...message, content: resolvedAssistantContent, insight: latestInsight }
+                : message,
+            ),
+          );
+          if (latestInsight) {
+            setSelectedInsightId(latestInsight.id);
+          }
+          setPendingPrompt(null);
+          setPendingAssistantId(null);
+        } catch (refreshError) {
+          setSystemWarning(refreshError.message || "Cloud log refresh delayed");
+        }
+
+        return;
+      }
+
       const response = await postChat(nextMessages.map((message) => ({ role: message.role, content: message.content })), {
         useDemo: useDemoData,
       });
@@ -562,6 +673,28 @@ export default function App() {
         setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, insight)]);
         setLogs((current) => [insight, ...current].slice(0, 50));
         setSelectedInsightId(insight.id);
+      } else if (chatMode === "cloud") {
+        setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, null)]);
+        try {
+          const { logsData, matchingLog } = await waitForSessionLog(cloudSessionId, previousTopLogId);
+          setLogs(logsData);
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    content: normalizeAssistantContent(errorPayload || { raw_text: assistantErrorContent }, matchingLog),
+                    insight: matchingLog,
+                  }
+                : message,
+            ),
+          );
+          if (matchingLog) {
+            setSelectedInsightId(matchingLog.id);
+          }
+        } catch {
+          // Keep assistant error bubble visible even if logs lag behind.
+        }
       } else {
         setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, null)]);
 
@@ -604,8 +737,8 @@ export default function App() {
       } else {
         setChatError(err.message || "Failed to send chat request");
       }
-      setPendingPrompt(null);
-      setPendingAssistantId(null);
+        setPendingPrompt(null);
+        setPendingAssistantId(null);
     } finally {
       setPendingChat(false);
     }
@@ -681,6 +814,9 @@ export default function App() {
         onSelectInsight={setSelectedInsightId}
         selectedInsight={selectedInsight}
         modeLabel={useByokMode ? "BYOK" : useDemoData ? "Demo" : "Proxy"}
+        chatMode={chatMode}
+        onChatModeChange={setChatMode}
+        sessionId={cloudSessionId}
       />
     );
   } else if (activeTab === "Dashboard") {

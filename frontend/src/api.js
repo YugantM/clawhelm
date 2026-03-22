@@ -108,10 +108,30 @@ export function postChat(messages, options) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "X-ClawHelm-Client": "dashboard",
       },
       body: JSON.stringify({
         model: "clawhelm-auto",
         messages,
+      }),
+    },
+    options,
+  );
+}
+
+export function postCloudChat({ message, sessionId }, options) {
+  return fetchJson(
+    "/chat",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-ClawHelm-Client": "dashboard",
+        "X-Session-Id": sessionId,
+      },
+      body: JSON.stringify({
+        message,
+        session_id: sessionId,
       }),
     },
     options,
