@@ -11,7 +11,8 @@ from .costs import estimate_cost_saved_for_free_request
 from .models import LogEntry
 from .performance import get_performance_by_model
 
-DB_PATH = Path(os.getenv("CLAWHELM_DB_PATH", "clawhelm.db"))
+DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "clawhelm.db"
+DB_PATH = Path(os.getenv("CLAWHELM_DB_PATH", str(DEFAULT_DB_PATH))).expanduser().resolve()
 
 
 class Database:

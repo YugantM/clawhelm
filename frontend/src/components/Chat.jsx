@@ -1,7 +1,7 @@
 import { useState } from "react";
 import Message from "./Message";
 
-export default function Chat({ messages, pending, onSend, selectedInsightId, onSelectInsight }) {
+export default function Chat({ messages, pending, onSend, selectedInsightId, onSelectInsight, modeLabel }) {
   const [input, setInput] = useState("");
 
   async function handleSubmit(event) {
@@ -27,7 +27,13 @@ export default function Chat({ messages, pending, onSend, selectedInsightId, onS
       <div className="section-heading">
         <div>
           <h2>Conversation</h2>
-          <p>Send prompts through the same OpenAI-compatible proxy the rest of the system uses.</p>
+          <p>
+            {modeLabel === "BYOK"
+              ? "Send prompts directly from this browser using your own provider key."
+              : modeLabel === "Demo"
+                ? "Bundled sample conversation mode for the public demo."
+                : "Send prompts through the same OpenAI-compatible proxy the rest of the system uses."}
+          </p>
         </div>
       </div>
 

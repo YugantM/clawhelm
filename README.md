@@ -412,6 +412,7 @@ collaboration:
 - `Enter` sends a chat message
 - `Shift+Enter` inserts a newline
 - the routing intelligence side panel can be collapsed from the chat view
+- the runtime strip shows which data source the dashboard is attached to and which SQLite file is serving the local UI
 - tab state is URL-addressable with:
   - `#Chat`
   - `#Dashboard`
@@ -449,6 +450,40 @@ cd frontend
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
+## OpenClaw Integration
+
+If OpenClaw itself is running on `http://localhost:18789`, that does not mean requests are automatically flowing through ClawHelm.
+
+OpenClaw must be configured to use ClawHelm as its OpenAI-compatible provider base URL.
+
+Use one of these, depending on how OpenClaw expects the base:
+
+```text
+http://127.0.0.1:8000
+```
+
+or
+
+```text
+http://127.0.0.1:8000/v1
+```
+
+The important part is that the final request path lands on:
+
+```text
+POST http://127.0.0.1:8000/v1/chat/completions
+```
+
+If OpenClaw is pointed somewhere else, the ClawHelm dashboard will continue polling `/logs` and `/stats`, but it will never see that OpenClaw traffic.
+
+Quick verification:
+
+1. Start ClawHelm locally with `./scripts/run_dashboard.sh`
+2. Open `http://127.0.0.1:5173`
+3. Confirm the runtime strip shows the local SQLite file and connected backend state
+4. Send a request from OpenClaw
+5. Confirm a new row appears in `Logs`
+
 ## GitHub Pages
 
 The repo is prepared for GitHub Pages frontend deployment.
@@ -474,13 +509,22 @@ After you publish the repo:
 
 Default behavior:
 
-- the workflow enables a public demo mode by default so the shared Pages link is usable even without a hosted backend
-- if you later host the backend, set `VITE_API_BASE_URL` and disable demo mode
+- the workflow enables a public demo mode by default so the shared Pages link is safe to share
+- the public Pages deployment does not expose your private backend logs or live proxy traffic
+
+Public demo usage:
+
+- `Demo` mode uses bundled sample data only
+- `Use your own key` enables browser-only `BYOK` mode
+- in `BYOK` mode the visitor chooses `OpenRouter` or `OpenAI`, enters their own API key, and sends requests directly from the browser to that provider
+- the key is stored only in `sessionStorage`
+- logs, stats, and routing insights in `BYOK` mode are local browser-session data, not your real ClawHelm server logs
 
 Important limitation:
 
 - GitHub Pages only hosts the static frontend
-- the FastAPI backend still needs to run somewhere else for live proxy requests
+- the FastAPI backend still needs to run somewhere else for real shared proxy requests
+- `BYOK` on Pages is useful for interactive demos, but it is not the same thing as routing through your self-hosted ClawHelm proxy
 
 ## API Endpoints
 

@@ -1,23 +1,53 @@
+function shortenModelName(modelId) {
+  if (!modelId) return "Unknown model";
+  const compact = modelId.split("/").pop() || modelId;
+  if (compact.length <= 28) return compact;
+  return `${compact.slice(0, 25)}...`;
+}
+
 function mapModelData(stats) {
-  return Object.entries(stats?.requests_by_actual_model || {}).map(([label, value]) => ({ label, value }));
+  return Object.entries(stats?.requests_by_actual_model || {})
+    .map(([label, value]) => ({ label, shortLabel: shortenModelName(label), value }))
+    .sort((left, right) => right.value - left.value);
 }
 
 function mapProviderData(stats) {
-  return Object.entries(stats?.requests_by_provider || {}).map(([label, value]) => ({ label, value }));
+  return Object.entries(stats?.requests_by_provider || {})
+    .map(([label, value]) => ({ label, value }))
+    .sort((left, right) => right.value - left.value);
 }
 
-function BarChart({ data }) {
+function formatPercent(value, total) {
+  if (!total) return "0%";
+  return `${((value / total) * 100).toFixed(0)}%`;
+}
+
+function ModelUsageList({ data }) {
   if (data.length === 0) return <div className="chart-empty">No model distribution yet</div>;
   const max = Math.max(...data.map((item) => item.value), 1);
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+  const visibleRows = data.slice(0, 6);
+
   return (
-    <div className="bars">
-      {data.map((item) => (
-        <div key={item.label} className="bar-row">
-          <span className="bar-label">{item.label}</span>
-          <div className="bar-track">
-            <div className="bar-fill" style={{ width: `${(item.value / max) * 100}%` }} />
+    <div className="usage-list">
+      {visibleRows.map((item, index) => (
+        <div key={item.label} className="usage-row">
+          <div className="usage-rank">{index + 1}</div>
+          <div className="usage-model">
+            <div className="usage-model__title">
+              <strong>{item.shortLabel}</strong>
+              <span>{formatPercent(item.value, total)}</span>
+            </div>
+            <span className="usage-model__subtitle" title={item.label}>
+              {item.label}
+            </span>
           </div>
-          <span className="bar-value">{item.value}</span>
+          <div className="usage-bar">
+            <div className="usage-bar__track">
+              <div className="usage-bar__fill" style={{ width: `${(item.value / max) * 100}%` }} />
+            </div>
+          </div>
+          <div className="usage-value">{item.value}</div>
         </div>
       ))}
     </div>
@@ -75,10 +105,10 @@ export default function Charts({ stats }) {
         <div className="section-heading">
           <div>
             <h2>Actual Models</h2>
-            <p>How frequently each real answering model is used.</p>
+            <p>Most-used real answering models, ranked by request volume.</p>
           </div>
         </div>
-        <BarChart data={modelData} />
+        <ModelUsageList data={modelData} />
       </div>
       <div className="panel">
         <div className="section-heading">

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getLogs, getStats, postChat } from "./api";
+import { getHealth, getLogs, getStats, postChat, postChatByok } from "./api";
 import Metrics from "./components/Metrics";
 import { DEMO_MODE } from "./demoData";
 import ChatPage from "./pages/ChatPage";
@@ -9,47 +9,40 @@ import Scoring from "./pages/Scoring";
 
 const REFRESH_INTERVAL_MS = 4000;
 const TABS = ["Chat", "Dashboard", "Logs", "Scoring"];
+const STORAGE_KEYS = {
+  publicMode: "clawhelm_public_mode",
+  byokProvider: "clawhelm_byok_provider",
+  byokApiKey: "clawhelm_byok_api_key",
+  byokModel: "clawhelm_byok_model",
+};
 
 function getTabFromHash() {
   const hashValue = window.location.hash.replace(/^#/, "").trim();
   return TABS.includes(hashValue) ? hashValue : "Chat";
 }
 
-function isDemoModeEnabled() {
-  return new URLSearchParams(window.location.search).get("demo") === "1";
+function getInitialPublicMode() {
+  if (!DEMO_MODE || typeof window === "undefined") {
+    return "live";
+  }
+
+  return window.sessionStorage.getItem(STORAGE_KEYS.publicMode) || "demo";
 }
 
-function getDemoMessages() {
-  const demoInsight = {
-    id: -1,
-    model_display_name: "openrouter/free -> openai/gpt-oss-120b:free",
-    actual_model: "openai/gpt-oss-120b:free",
-    selected_model: "openrouter/free",
-    provider: "openrouter",
-    routing_reason: "selected based on performance score",
-    routing_score: 0.821,
-    latency: 2.2201,
-    total_tokens: 124,
-    estimated_cost: 0,
-    fallback_used: false,
-  };
+function getInitialByokConfig() {
+  if (typeof window === "undefined") {
+    return {
+      provider: "openrouter",
+      apiKey: "",
+      model: "openai/gpt-oss-120b:free",
+    };
+  }
 
-  return [
-    createMessage("demo-user-1", "user", "Plan a suspiciously over-engineered birthday party for a cat named Kernel."),
-    createMessage(
-      "demo-assistant-1",
-      "assistant",
-      "Kernel deserves a launch sequence, not a party. Start with a cardboard mission control wall, issue every guest a badge with a fake systems title, and schedule the cake reveal as a 'critical deployment window.' Add laser-pointer threat drills, tuna can towers as centerpieces, and a dramatic countdown before the cat ignores all of it and sits in the shipping box.",
-      demoInsight,
-    ),
-    createMessage("demo-user-2", "user", "Give me a tagline for the invitation."),
-    createMessage(
-      "demo-assistant-2",
-      "assistant",
-      "\"ClawHelm presents: Kernel One. All systems nominal. Treats mandatory.\"",
-      demoInsight,
-    ),
-  ];
+  return {
+    provider: window.sessionStorage.getItem(STORAGE_KEYS.byokProvider) || "openrouter",
+    apiKey: window.sessionStorage.getItem(STORAGE_KEYS.byokApiKey) || "",
+    model: window.sessionStorage.getItem(STORAGE_KEYS.byokModel) || "openai/gpt-oss-120b:free",
+  };
 }
 
 function createMessage(id, role, content, insight = null) {
@@ -111,7 +104,7 @@ async function waitForLatestLog(previousTopLogId, retries = 8, delayMs = 350) {
   for (let attempt = 0; attempt < retries; attempt += 1) {
     let logsData = [];
     try {
-      logsData = await getLogs();
+      logsData = await getLogs({ useDemo: false });
     } catch {
       logsData = [];
     }
@@ -126,17 +119,207 @@ async function waitForLatestLog(previousTopLogId, retries = 8, delayMs = 350) {
     });
   }
 
-  return getLogs();
+  return getLogs({ useDemo: false });
+}
+
+function buildByokInsight({ response, provider, model, prompt, startedAt, fallbackUsed = false, statusCode = 200 }) {
+  const actualModel = response?.model || model;
+  const responseText = normalizeAssistantContent(response, null);
+  const totalTokens = response?.usage?.total_tokens ?? null;
+  const latencySeconds = Math.max((performance.now() - startedAt) / 1000, 0);
+
+  return {
+    id: Date.now(),
+    timestamp: new Date().toISOString(),
+    original_model: model,
+    selected_model: model,
+    actual_model: actualModel,
+    model_display_name: actualModel !== model ? `${model} -> ${actualModel}` : actualModel,
+    provider,
+    is_free_model: actualModel.endsWith?.(":free") || model.endsWith?.(":free"),
+    model_source: "byok",
+    routing_reason: "user supplied api key",
+    routing_score: null,
+    status_code: statusCode,
+    fallback_used: fallbackUsed,
+    prompt: JSON.stringify(prompt),
+    response: responseText,
+    latency: latencySeconds,
+    total_tokens: totalTokens,
+    estimated_cost: actualModel.endsWith?.(":free") ? 0 : 0,
+  };
+}
+
+function deriveByokStats(logs) {
+  const totalRequests = logs.length;
+  const successfulRequests = logs.filter((entry) => (entry.status_code || 0) < 400).length;
+  const failedRequests = totalRequests - successfulRequests;
+  const fallbackCount = logs.filter((entry) => entry.fallback_used).length;
+  const totalLatency = logs.reduce((sum, entry) => sum + (entry.latency || 0), 0);
+  const totalEstimatedCost = logs.reduce((sum, entry) => sum + (entry.estimated_cost || 0), 0);
+  const requestsByActualModel = {};
+  const requestsByProvider = {};
+  const performanceByModel = {};
+
+  logs.forEach((entry) => {
+    if (entry.actual_model) {
+      requestsByActualModel[entry.actual_model] = (requestsByActualModel[entry.actual_model] || 0) + 1;
+    }
+    if (entry.provider) {
+      requestsByProvider[entry.provider] = (requestsByProvider[entry.provider] || 0) + 1;
+    }
+  });
+
+  Object.keys(requestsByActualModel).forEach((modelId) => {
+    const modelLogs = logs.filter((entry) => entry.actual_model === modelId);
+    const modelSuccess = modelLogs.filter((entry) => (entry.status_code || 0) < 400).length;
+    const avgLatency = modelLogs.reduce((sum, entry) => sum + (entry.latency || 0), 0) / Math.max(modelLogs.length, 1);
+    const avgCost = modelLogs.reduce((sum, entry) => sum + (entry.estimated_cost || 0), 0) / Math.max(modelLogs.length, 1);
+    performanceByModel[modelId] = {
+      success_rate: modelSuccess / Math.max(modelLogs.length, 1),
+      avg_latency: avgLatency,
+      avg_cost: avgCost,
+      latency_score: avgLatency > 0 ? 1 / (1 + avgLatency) : 1,
+      cost_score: avgCost > 0 ? 1 / (1 + avgCost) : 1,
+      confidence: Math.min(modelLogs.length / 5, 1),
+      score: 0.5,
+      sample_count: modelLogs.length,
+    };
+  });
+
+  return {
+    total_requests: totalRequests,
+    successful_requests: successfulRequests,
+    failed_requests: failedRequests,
+    fallback_count: fallbackCount,
+    avg_latency: totalRequests ? totalLatency / totalRequests : 0,
+    total_estimated_cost_usd: totalEstimatedCost,
+    free_model_usage_count: logs.filter((entry) => entry.is_free_model).length,
+    requests_using_free_models: logs.filter((entry) => entry.is_free_model).length,
+    cost_saved_estimate: 0,
+    requests_by_actual_model: requestsByActualModel,
+    requests_by_provider: requestsByProvider,
+    usage_by_provider: requestsByProvider,
+    performance_by_model: performanceByModel,
+    candidate_scores: Object.entries(performanceByModel).map(([modelId, values], index) => ({
+      rank: index + 1,
+      model_id: modelId,
+      provider: logs.find((entry) => entry.actual_model === modelId)?.provider || "unknown",
+      is_free: modelId.endsWith(":free"),
+      enabled: true,
+      excluded: false,
+      exclusion_reason: null,
+      ...values,
+    })),
+  };
+}
+
+function RuntimeStrip({ health, publicMode, byokConfig }) {
+  const items = [];
+
+  if (publicMode === "byok") {
+    items.push({ label: "Mode", value: "Browser BYOK" });
+    items.push({ label: "Provider", value: byokConfig.provider });
+    items.push({ label: "Model", value: byokConfig.model || "Not set" });
+    items.push({ label: "Storage", value: "Session only" });
+  } else if (health) {
+    items.push({ label: "Service", value: health.service || "clawhelm" });
+    items.push({ label: "Source", value: publicMode === "demo" ? "Bundled sample data" : "Connected ClawHelm backend" });
+    items.push({ label: "Database", value: health.db_path || "unknown" });
+    items.push({ label: "Routing", value: `${health.allow_openai_routing ? "OpenAI" : "-"} ${health.allow_openrouter_routing ? "/ OpenRouter" : ""}`.trim() || "disabled" });
+  }
+
+  if (items.length === 0) return null;
+
+  return (
+    <section className="runtime-strip panel">
+      {items.map((item) => (
+        <div key={item.label} className="runtime-strip__item">
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function PublicAccessPanel({ publicMode, onPublicModeChange, byokConfig, onByokConfigChange }) {
+  return (
+    <section className="access-panel panel">
+      <div className="access-panel__header">
+        <div>
+          <h2>Public access</h2>
+          <p>GitHub Pages stays safe by default. Switch to your own key if you want real provider responses in the browser.</p>
+        </div>
+        <div className="access-toggle" role="tablist" aria-label="Public access mode">
+          <button
+            type="button"
+            className={publicMode === "demo" ? "access-toggle__button access-toggle__button--active" : "access-toggle__button"}
+            onClick={() => onPublicModeChange("demo")}
+          >
+            Demo
+          </button>
+          <button
+            type="button"
+            className={publicMode === "byok" ? "access-toggle__button access-toggle__button--active" : "access-toggle__button"}
+            onClick={() => onPublicModeChange("byok")}
+          >
+            Use your own key
+          </button>
+        </div>
+      </div>
+
+      {publicMode === "byok" ? (
+        <div className="access-grid">
+          <label>
+            <span>Provider</span>
+            <select
+              value={byokConfig.provider}
+              onChange={(event) => onByokConfigChange({ provider: event.target.value })}
+            >
+              <option value="openrouter">OpenRouter</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </label>
+          <label>
+            <span>Model</span>
+            <input
+              type="text"
+              value={byokConfig.model}
+              onChange={(event) => onByokConfigChange({ model: event.target.value })}
+              placeholder="openai/gpt-oss-120b:free"
+            />
+          </label>
+          <label className="access-grid__full">
+            <span>API key</span>
+            <input
+              type="password"
+              value={byokConfig.apiKey}
+              onChange={(event) => onByokConfigChange({ apiKey: event.target.value })}
+              placeholder="Stored only in this browser session"
+            />
+          </label>
+          <p className="access-panel__note">
+            Keys stay in sessionStorage for this browser tab session and are sent directly to the provider, not to the ClawHelm demo host.
+          </p>
+        </div>
+      ) : (
+        <p className="access-panel__note">Demo mode uses bundled sample data only. No live backend traffic or private logs are exposed.</p>
+      )}
+    </section>
+  );
 }
 
 export default function App() {
   const iconSrc = `${import.meta.env.BASE_URL}clawhelm-icon.svg`;
-  const demoMode = isDemoModeEnabled();
   const [activeTab, setActiveTab] = useState(getTabFromHash);
+  const [publicMode, setPublicMode] = useState(getInitialPublicMode);
+  const [byokConfig, setByokConfig] = useState(getInitialByokConfig);
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState(null);
-  const [messages, setMessages] = useState(() => (demoMode ? getDemoMessages() : []));
-  const [selectedInsightId, setSelectedInsightId] = useState(() => (demoMode ? -1 : null));
+  const [health, setHealth] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [pendingChat, setPendingChat] = useState(false);
   const [error, setError] = useState("");
@@ -144,23 +327,68 @@ export default function App() {
   const [pendingPrompt, setPendingPrompt] = useState(null);
   const [pendingAssistantId, setPendingAssistantId] = useState(null);
 
-  async function refreshData() {
-    const [logsData, statsData] = await Promise.all([getLogs(), getStats()]);
-    setLogs(logsData);
-    setStats(statsData);
-    setSystemWarning("");
-    return { logsData, statsData };
-  }
+  const useDemoData = DEMO_MODE && publicMode === "demo";
+  const useByokMode = DEMO_MODE && publicMode === "byok";
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem(STORAGE_KEYS.publicMode, publicMode);
+  }, [publicMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem(STORAGE_KEYS.byokProvider, byokConfig.provider);
+    window.sessionStorage.setItem(STORAGE_KEYS.byokApiKey, byokConfig.apiKey);
+    window.sessionStorage.setItem(STORAGE_KEYS.byokModel, byokConfig.model);
+  }, [byokConfig]);
+
+  useEffect(() => {
+    if (useDemoData) {
+      setMessages([]);
+      setSelectedInsightId(null);
+    }
+  }, [useDemoData]);
+
+  useEffect(() => {
+    function syncTabFromHash() {
+      setActiveTab(getTabFromHash());
+    }
+
+    window.addEventListener("hashchange", syncTabFromHash);
+    return () => {
+      window.removeEventListener("hashchange", syncTabFromHash);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
 
     async function load() {
       try {
-        const [logsData, statsData] = await Promise.all([getLogs(), getStats()]);
+        if (useByokMode) {
+          const localStats = deriveByokStats(logs);
+          if (!active) return;
+          setStats(localStats);
+          setHealth({
+            status: "ok",
+            service: "clawhelm-byok",
+            provider_base_url: byokConfig.provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com",
+            db_path: "session://browser-memory",
+          });
+          setSystemWarning("");
+          return;
+        }
+
+        const useDemo = useDemoData;
+        const [logsData, statsData, healthData] = await Promise.all([
+          getLogs({ useDemo }),
+          getStats({ useDemo }),
+          getHealth({ useDemo }),
+        ]);
         if (!active) return;
         setLogs(logsData);
         setStats(statsData);
+        setHealth(healthData);
         setSystemWarning("");
       } catch (err) {
         if (!active) return;
@@ -179,21 +407,10 @@ export default function App() {
       active = false;
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [byokConfig.provider, logs, useByokMode, useDemoData]);
 
   useEffect(() => {
-    function syncTabFromHash() {
-      setActiveTab(getTabFromHash());
-    }
-
-    window.addEventListener("hashchange", syncTabFromHash);
-    return () => {
-      window.removeEventListener("hashchange", syncTabFromHash);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!pendingPrompt || !pendingAssistantId || logs.length === 0) {
+    if (!pendingPrompt || !pendingAssistantId || logs.length === 0 || useByokMode || useDemoData) {
       return;
     }
 
@@ -220,7 +437,7 @@ export default function App() {
     setSelectedInsightId(latestInsight.id);
     setPendingPrompt(null);
     setPendingAssistantId(null);
-  }, [logs, pendingAssistantId, pendingPrompt]);
+  }, [logs, pendingAssistantId, pendingPrompt, useByokMode, useDemoData]);
 
   async function handleSend(prompt) {
     const previousTopLogId = logs[0]?.id ?? null;
@@ -234,19 +451,70 @@ export default function App() {
     setPendingAssistantId(assistantMessageId);
 
     try {
-      const response = await postChat(nextMessages.map((message) => ({ role: message.role, content: message.content })));
+      if (useByokMode) {
+        const startedAt = performance.now();
+        const response = await postChatByok({
+          provider: byokConfig.provider,
+          apiKey: byokConfig.apiKey,
+          model: byokConfig.model,
+          messages: nextMessages.map((message) => ({ role: message.role, content: message.content })),
+        });
+        const insight = buildByokInsight({
+          response,
+          provider: byokConfig.provider,
+          model: byokConfig.model,
+          prompt: nextMessages.map((message) => ({ role: message.role, content: message.content })),
+          startedAt,
+        });
+        const assistantContent = normalizeAssistantContent(response, insight);
+        setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantContent, insight)]);
+        setLogs((current) => [insight, ...current].slice(0, 50));
+        setSelectedInsightId(insight.id);
+        setPendingPrompt(null);
+        setPendingAssistantId(null);
+        return;
+      }
+
+      const response = await postChat(nextMessages.map((message) => ({ role: message.role, content: message.content })), {
+        useDemo: useDemoData,
+      });
       const optimisticAssistantContent = normalizeAssistantContent(response, null);
-      setMessages((current) => [
-        ...current,
-        createMessage(assistantMessageId, "assistant", optimisticAssistantContent, null),
-      ]);
+      setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", optimisticAssistantContent, null)]);
+
+      if (useDemoData) {
+        const insight = {
+          id: Date.now(),
+          timestamp: new Date().toISOString(),
+          selected_model: response.model,
+          actual_model: response.model,
+          model_display_name: response.model,
+          provider: "demo",
+          routing_reason: "bundled sample response",
+          latency: 0,
+          routing_score: null,
+          total_tokens: response?.usage?.total_tokens ?? null,
+          estimated_cost: 0,
+          fallback_used: false,
+          response: optimisticAssistantContent,
+        };
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === assistantMessageId ? { ...message, content: optimisticAssistantContent, insight } : message,
+          ),
+        );
+        setSelectedInsightId(insight.id);
+        setPendingPrompt(null);
+        setPendingAssistantId(null);
+        return;
+      }
 
       try {
         const logsData = await waitForLatestLog(previousTopLogId);
         setLogs(logsData);
         try {
-          const statsData = await getStats();
+          const [statsData, healthData] = await Promise.all([getStats({ useDemo: false }), getHealth({ useDemo: false })]);
           setStats(statsData);
+          setHealth(healthData);
           setSystemWarning("");
         } catch (statsError) {
           setSystemWarning(statsError.message || "Metrics refresh delayed");
@@ -284,41 +552,54 @@ export default function App() {
       const errorPayload = err?.payload || null;
       const assistantErrorContent = normalizeAssistantContent(errorPayload, logs[0] || null);
 
-      setMessages((current) => [
-        ...current,
-        createMessage(assistantMessageId, "assistant", assistantErrorContent, null),
-      ]);
-
-      try {
-        const logsData = await waitForLatestLog(previousTopLogId);
-        setLogs(logsData);
-
-        const latestInsight = logsData[0] || null;
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantMessageId
-              ? {
-                  ...message,
-                  content: normalizeAssistantContent(errorPayload || { raw_text: assistantErrorContent }, latestInsight),
-                  insight: latestInsight,
-                }
-              : message,
-          ),
-        );
-
-        if (latestInsight) {
-          setSelectedInsightId(latestInsight.id);
-        }
+      if (useByokMode) {
+        const startedAt = performance.now();
+        const insight = buildByokInsight({
+          response: errorPayload || { raw_text: assistantErrorContent },
+          provider: byokConfig.provider,
+          model: byokConfig.model,
+          prompt: nextMessages.map((message) => ({ role: message.role, content: message.content })),
+          startedAt,
+          statusCode: err?.status || 500,
+        });
+        setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, insight)]);
+        setLogs((current) => [insight, ...current].slice(0, 50));
+        setSelectedInsightId(insight.id);
+      } else {
+        setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, null)]);
 
         try {
-          const statsData = await getStats();
-          setStats(statsData);
-          setSystemWarning("");
-        } catch (statsError) {
-          setSystemWarning(statsError.message || "Metrics refresh delayed");
+          const logsData = await waitForLatestLog(previousTopLogId);
+          setLogs(logsData);
+
+          const latestInsight = logsData[0] || null;
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    content: normalizeAssistantContent(errorPayload || { raw_text: assistantErrorContent }, latestInsight),
+                    insight: latestInsight,
+                  }
+                : message,
+            ),
+          );
+
+          if (latestInsight) {
+            setSelectedInsightId(latestInsight.id);
+          }
+
+          try {
+            const [statsData, healthData] = await Promise.all([getStats({ useDemo: false }), getHealth({ useDemo: false })]);
+            setStats(statsData);
+            setHealth(healthData);
+            setSystemWarning("");
+          } catch (statsError) {
+            setSystemWarning(statsError.message || "Metrics refresh delayed");
+          }
+        } catch {
+          // Keep the assistant error bubble even if logs lag behind.
         }
-      } catch {
-        // Keep the assistant error bubble even if logs lag behind.
       }
 
       if (errorPayload) {
@@ -348,6 +629,7 @@ export default function App() {
         selectedInsightId={selectedInsightId}
         onSelectInsight={setSelectedInsightId}
         selectedInsight={selectedInsight}
+        modeLabel={useByokMode ? "BYOK" : useDemoData ? "Demo" : "Proxy"}
       />
     );
   } else if (activeTab === "Dashboard") {
@@ -373,10 +655,10 @@ export default function App() {
         <div className="topbar__status">
           <span
             className={`status-pill ${
-              error ? "status-pill--danger" : DEMO_MODE ? "status-pill--demo" : "status-pill--live"
+              error ? "status-pill--danger" : useByokMode ? "status-pill--byok" : useDemoData ? "status-pill--demo" : "status-pill--live"
             }`}
           >
-            {error ? "Chat error" : DEMO_MODE ? "Demo" : "Live"}
+            {error ? "Chat error" : useByokMode ? "BYOK" : useDemoData ? "Demo" : "Live"}
           </span>
         </div>
       </header>
@@ -399,14 +681,24 @@ export default function App() {
         </div>
       </nav>
 
+      {DEMO_MODE ? (
+        <PublicAccessPanel
+          publicMode={publicMode}
+          onPublicModeChange={setPublicMode}
+          byokConfig={byokConfig}
+          onByokConfigChange={(next) => setByokConfig((current) => ({ ...current, ...next }))}
+        />
+      ) : null}
+
       {error ? <div className="error-banner">{error}</div> : null}
-      {!error && DEMO_MODE ? (
+      {!error && useDemoData ? (
         <div className="warning-banner">
           Public demo mode. This site uses bundled sample data and does not expose private logs or live backend traffic.
         </div>
       ) : null}
       {!error && systemWarning ? <div className="warning-banner">{systemWarning}</div> : null}
 
+      <RuntimeStrip health={health} publicMode={publicMode} byokConfig={byokConfig} />
       {activeTab !== "Logs" ? <Metrics stats={stats} /> : null}
       {page}
     </div>

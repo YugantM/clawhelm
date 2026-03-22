@@ -69,6 +69,10 @@ async def refresh_models(request: Request):
 async def health():
     return {
         "status": "ok",
+        "service": "clawhelm",
         "provider_base_url": os.getenv("PROVIDER_BASE_URL", "https://api.openai.com"),
         "openrouter_enabled": os.getenv("ENABLE_OPENROUTER", "false").lower() == "true",
+        "allow_openai_routing": os.getenv("ALLOW_OPENAI_ROUTING", "true").lower() == "true",
+        "allow_openrouter_routing": os.getenv("ALLOW_OPENROUTER_ROUTING", "true").lower() == "true",
+        "db_path": str(db.db_path),
     }
