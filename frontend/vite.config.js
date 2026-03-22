@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => {
         "/logs": proxyTarget,
         "/stats": proxyTarget,
         "/health": proxyTarget,
+        "/config": proxyTarget,
         "/refresh-models": proxyTarget,
         "/v1": proxyTarget,
       },

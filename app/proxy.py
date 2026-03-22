@@ -75,8 +75,41 @@ def extract_total_tokens(payload: Any) -> int | None:
     usage = payload.get("usage")
     if not isinstance(usage, Mapping):
         return None
-    total_tokens = usage.get("total_tokens")
-    return total_tokens if isinstance(total_tokens, int) else None
+
+    total_candidates = (
+        usage.get("total_tokens"),
+        usage.get("totalTokens"),
+    )
+    for candidate in total_candidates:
+        if isinstance(candidate, int):
+            return candidate
+
+    prompt_tokens = _coerce_token_int(
+        usage.get("prompt_tokens"),
+        usage.get("promptTokens"),
+        usage.get("input_tokens"),
+        usage.get("inputTokens"),
+    )
+    completion_tokens = _coerce_token_int(
+        usage.get("completion_tokens"),
+        usage.get("completionTokens"),
+        usage.get("output_tokens"),
+        usage.get("outputTokens"),
+    )
+
+    if prompt_tokens is not None and completion_tokens is not None:
+        return prompt_tokens + completion_tokens
+
+    return None
+
+
+def _coerce_token_int(*values: Any) -> int | None:
+    for value in values:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    return None
 
 
 def extract_actual_model(payload: Any) -> str | None:
@@ -102,6 +135,26 @@ def filter_response_headers(headers: httpx.Headers) -> dict[str, str]:
     }
 
 
+def detect_request_source(request: Request, original_model: str | None) -> str:
+    explicit_source = request.headers.get("x-clawhelm-client", "").strip().lower()
+    if explicit_source in {"dashboard", "openclaw", "external"}:
+        return explicit_source
+
+    user_agent = request.headers.get("user-agent", "").lower()
+    if "openclaw" in user_agent:
+        return "openclaw"
+
+    origin = request.headers.get("origin", "").lower()
+    referer = request.headers.get("referer", "").lower()
+    if ":5173" in origin or ":5173" in referer:
+        return "dashboard"
+
+    if original_model == "clawhelm-auto":
+        return "openclaw"
+
+    return "external"
+
+
 async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -> Response:
     request_body = await request.body()
     request_json: dict[str, Any] | None = None
@@ -125,6 +178,8 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
         prompt = truncate_text(request_body.decode("utf-8", errors="replace"))
         route_decision = None
 
+    request_source = detect_request_source(request, original_model)
+
     started_at = time.perf_counter()
     response_text_for_log: str | None = None
     total_tokens: int | None = None
@@ -142,6 +197,7 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
     ) -> None:
         selected_model = decision.model if decision else original_model
         await db.insert_log(
+            request_source=request_source,
             original_model=original_model,
             selected_model=selected_model,
             actual_model=actual_model or selected_model,

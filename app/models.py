@@ -9,6 +9,7 @@ from pydantic import BaseModel
 class LogEntry(BaseModel):
     id: int
     timestamp: datetime
+    request_source: str | None
     original_model: str | None
     selected_model: str | None
     actual_model: str | None
@@ -42,3 +43,18 @@ class StatsResponse(BaseModel):
     usage_by_provider: dict[str, int]
     performance_by_model: dict[str, dict[str, float]]
     candidate_scores: list[dict[str, Any]]
+
+
+class ProviderStatus(BaseModel):
+    configured: bool
+    source: str
+    masked_key: str | None
+
+
+class ProviderConfigResponse(BaseModel):
+    settings_path: str
+    providers: dict[str, ProviderStatus]
+
+
+class ProviderApiKeyUpdate(BaseModel):
+    api_key: str = ""

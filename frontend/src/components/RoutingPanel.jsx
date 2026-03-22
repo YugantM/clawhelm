@@ -58,6 +58,7 @@ export default function RoutingPanel({ insight, collapsed, onToggle }) {
           <div className="routing-grid">
             <InsightRow label="Selected model" value={insight.selected_model} />
             <InsightRow label="Actual model" value={insight.actual_model} />
+            <InsightRow label="Source" value={insight.request_source} />
             <InsightRow label="Provider" value={insight.provider} />
             <InsightRow label="Latency" value={formatLatency(insight.latency)} />
             <InsightRow label="Score" value={formatScore(insight.routing_score)} />

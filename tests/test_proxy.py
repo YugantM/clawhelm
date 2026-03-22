@@ -17,6 +17,7 @@ os.environ["OPENROUTER_API_KEY"] = "local-openrouter-key"
 os.environ["ENABLE_OPENROUTER"] = "true"
 os.environ["OPENCLAW_MODELS"] = "custom/openclaw-model,meta-llama/llama-3.3-8b-instruct:free"
 os.environ["CLAWHELM_DB_PATH"] = str(Path("test-clawhelm.db").resolve())
+os.environ["CLAWHELM_SETTINGS_PATH"] = str(Path("test-clawhelm-settings.json").resolve())
 os.environ["CHEAP_MODEL"] = "gpt-3.5-turbo-fail"
 os.environ["MID_MODEL"] = "gpt-4o-mini"
 os.environ["EXPENSIVE_MODEL"] = "gpt-4o"
@@ -26,17 +27,23 @@ os.environ["EXPENSIVE_MODEL_COST_PER_1K_TOKENS"] = "5.0"
 
 from app.main import app
 from app.models_registry import model_registry
+from app.proxy import extract_total_tokens
 from app.router import get_ranked_route_decisions
 
 
 @pytest.fixture(autouse=True)
 def cleanup_test_db():
     db_path = Path(os.environ["CLAWHELM_DB_PATH"])
+    settings_path = Path(os.environ["CLAWHELM_SETTINGS_PATH"])
     if db_path.exists():
         db_path.unlink()
+    if settings_path.exists():
+        settings_path.unlink()
     yield
     if db_path.exists():
         db_path.unlink()
+    if settings_path.exists():
+        settings_path.unlink()
 
 
 @pytest_asyncio.fixture
@@ -89,6 +96,7 @@ async def test_chat_completions_proxy_and_logs(test_client: httpx.AsyncClient):
     assert logs[0]["actual_model"] == "meta-llama/llama-3.3-8b-instruct:free"
     assert logs[0]["model_display_name"] == "openrouter/free -> meta-llama/llama-3.3-8b-instruct:free"
     assert logs[0]["provider"] == "openrouter"
+    assert logs[0]["request_source"] == "external"
     assert logs[0]["is_free_model"] is True
     assert logs[0]["model_source"] == "available_pool"
     assert logs[0]["routing_reason"] == "selected based on performance score"
@@ -200,3 +208,44 @@ async def test_ranked_candidates_prefer_openrouter_free_on_cold_start(test_clien
     assert ranked
     assert ranked[0].model == "openrouter/free"
     assert ranked[0].provider == "openrouter"
+
+
+def test_extract_total_tokens_supports_multiple_usage_shapes():
+    assert extract_total_tokens({"usage": {"total_tokens": 11}}) == 11
+    assert extract_total_tokens({"usage": {"totalTokens": 12}}) == 12
+    assert extract_total_tokens({"usage": {"prompt_tokens": 8, "completion_tokens": 3}}) == 11
+    assert extract_total_tokens({"usage": {"input_tokens": 8, "output_tokens": 4}}) == 12
+    assert extract_total_tokens({"usage": {"inputTokens": "9", "outputTokens": "5"}}) == 14
+
+
+@pytest.mark.asyncio
+async def test_provider_config_endpoint_persists_openrouter_key(test_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    response = await test_client.put("/config/providers/openrouter", json={"api_key": "or-test-123456"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["providers"]["openrouter"]["configured"] is True
+    assert payload["providers"]["openrouter"]["source"] == "settings"
+    assert payload["providers"]["openrouter"]["masked_key"].startswith("or-t")
+
+    health_response = await test_client.get("/health")
+    assert health_response.status_code == 200
+    assert health_response.json()["openrouter_key_configured"] is True
+
+
+@pytest.mark.asyncio
+async def test_dashboard_requests_are_labeled_in_logs(test_client: httpx.AsyncClient):
+    response = await test_client.post(
+        "/v1/chat/completions",
+        headers={"X-ClawHelm-Client": "dashboard"},
+        json={
+            "model": "clawhelm-auto",
+            "messages": [{"role": "user", "content": "source test"}],
+        },
+    )
+
+    assert response.status_code == 200
+    logs_response = await test_client.get("/logs")
+    logs = logs_response.json()
+    assert logs[0]["request_source"] == "dashboard"

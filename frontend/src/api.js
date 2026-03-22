@@ -16,6 +16,25 @@ function getDemoPayload(path, options) {
       allow_openai_routing: true,
       allow_openrouter_routing: true,
       db_path: "demo://bundled-sample-data",
+      settings_path: "demo://bundled-sample-data",
+      openrouter_key_configured: true,
+    };
+  }
+  if (path === "/config/providers") {
+    return {
+      settings_path: "demo://bundled-sample-data",
+      providers: {
+        openrouter: {
+          configured: true,
+          source: "demo",
+          masked_key: "demo********key",
+        },
+        openai: {
+          configured: false,
+          source: "missing",
+          masked_key: null,
+        },
+      },
     };
   }
   if (path === "/v1/chat/completions") {
@@ -59,6 +78,27 @@ export function getStats(options) {
 
 export function getHealth(options) {
   return fetchJson("/health", undefined, options);
+}
+
+export function getProviderConfig(options) {
+  return fetchJson("/config/providers", undefined, options);
+}
+
+export function updateOpenRouterApiKey(apiKey, options) {
+  return fetchJson(
+    "/config/providers/openrouter",
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-ClawHelm-Client": "dashboard",
+      },
+      body: JSON.stringify({
+        api_key: apiKey,
+      }),
+    },
+    options,
+  );
 }
 
 export function postChat(messages, options) {

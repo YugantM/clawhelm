@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { getHealth, getLogs, getStats, postChat, postChatByok } from "./api";
-import Metrics from "./components/Metrics";
+import { getHealth, getLogs, getProviderConfig, getStats, postChat, postChatByok, updateOpenRouterApiKey } from "./api";
 import { DEMO_MODE } from "./demoData";
 import ChatPage from "./pages/ChatPage";
 import Dashboard from "./pages/Dashboard";
 import Logs from "./pages/Logs";
 import Scoring from "./pages/Scoring";
+import Settings from "./pages/Settings";
 
 const REFRESH_INTERVAL_MS = 4000;
-const TABS = ["Chat", "Dashboard", "Logs", "Scoring"];
+const TABS = ["Chat", "Dashboard", "Logs", "Scoring", "Settings"];
 const STORAGE_KEYS = {
   publicMode: "clawhelm_public_mode",
   byokProvider: "clawhelm_byok_provider",
@@ -214,33 +214,24 @@ function deriveByokStats(logs) {
   };
 }
 
-function RuntimeStrip({ health, publicMode, byokConfig }) {
-  const items = [];
+function buildEffectiveProviderConfig(providerConfig, health) {
+  const openrouterConfigured = providerConfig?.providers?.openrouter?.configured ?? Boolean(health?.openrouter_key_configured);
 
-  if (publicMode === "byok") {
-    items.push({ label: "Mode", value: "Browser BYOK" });
-    items.push({ label: "Provider", value: byokConfig.provider });
-    items.push({ label: "Model", value: byokConfig.model || "Not set" });
-    items.push({ label: "Storage", value: "Session only" });
-  } else if (health) {
-    items.push({ label: "Service", value: health.service || "clawhelm" });
-    items.push({ label: "Source", value: publicMode === "demo" ? "Bundled sample data" : "Connected ClawHelm backend" });
-    items.push({ label: "Database", value: health.db_path || "unknown" });
-    items.push({ label: "Routing", value: `${health.allow_openai_routing ? "OpenAI" : "-"} ${health.allow_openrouter_routing ? "/ OpenRouter" : ""}`.trim() || "disabled" });
-  }
-
-  if (items.length === 0) return null;
-
-  return (
-    <section className="runtime-strip panel">
-      {items.map((item) => (
-        <div key={item.label} className="runtime-strip__item">
-          <span>{item.label}</span>
-          <strong>{item.value}</strong>
-        </div>
-      ))}
-    </section>
-  );
+  return {
+    settings_path: providerConfig?.settings_path || health?.settings_path || "unknown",
+    providers: {
+      openrouter: {
+        configured: openrouterConfigured,
+        source: providerConfig?.providers?.openrouter?.source || (health?.openrouter_key_configured ? "runtime" : "missing"),
+        masked_key: providerConfig?.providers?.openrouter?.masked_key || (health?.openrouter_key_configured ? "Configured" : null),
+      },
+      openai: {
+        configured: providerConfig?.providers?.openai?.configured || false,
+        source: providerConfig?.providers?.openai?.source || "missing",
+        masked_key: providerConfig?.providers?.openai?.masked_key || null,
+      },
+    },
+  };
 }
 
 function PublicAccessPanel({ publicMode, onPublicModeChange, byokConfig, onByokConfigChange }) {
@@ -318,12 +309,16 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState(null);
   const [health, setHealth] = useState(null);
+  const [providerConfig, setProviderConfig] = useState(null);
+  const [openrouterDraft, setOpenrouterDraft] = useState("");
   const [messages, setMessages] = useState([]);
   const [selectedInsightId, setSelectedInsightId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [pendingChat, setPendingChat] = useState(false);
-  const [error, setError] = useState("");
+  const [chatError, setChatError] = useState("");
+  const [settingsError, setSettingsError] = useState("");
   const [systemWarning, setSystemWarning] = useState("");
+  const [savingProviderConfig, setSavingProviderConfig] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState(null);
   const [pendingAssistantId, setPendingAssistantId] = useState(null);
 
@@ -380,15 +375,17 @@ export default function App() {
         }
 
         const useDemo = useDemoData;
-        const [logsData, statsData, healthData] = await Promise.all([
+        const [logsData, statsData, healthData, providerConfigData] = await Promise.all([
           getLogs({ useDemo }),
           getStats({ useDemo }),
           getHealth({ useDemo }),
+          getProviderConfig({ useDemo }),
         ]);
         if (!active) return;
         setLogs(logsData);
         setStats(statsData);
         setHealth(healthData);
+        setProviderConfig(providerConfigData);
         setSystemWarning("");
       } catch (err) {
         if (!active) return;
@@ -446,7 +443,7 @@ export default function App() {
     const nextMessages = [...messages, userMessage];
     setMessages(nextMessages);
     setPendingChat(true);
-    setError("");
+    setChatError("");
     setPendingPrompt(prompt);
     setPendingAssistantId(assistantMessageId);
 
@@ -603,9 +600,9 @@ export default function App() {
       }
 
       if (errorPayload) {
-        setError("");
+        setChatError("");
       } else {
-        setError(err.message || "Failed to send chat request");
+        setChatError(err.message || "Failed to send chat request");
       }
       setPendingPrompt(null);
       setPendingAssistantId(null);
@@ -618,6 +615,60 @@ export default function App() {
     () => logs.find((entry) => entry.id === selectedInsightId) || messages.find((message) => message.insight?.id === selectedInsightId)?.insight || null,
     [logs, messages, selectedInsightId],
   );
+  const effectiveProviderConfig = useMemo(() => buildEffectiveProviderConfig(providerConfig, health), [providerConfig, health]);
+  const currentPageError = activeTab === "Chat" ? chatError : activeTab === "Settings" ? settingsError : "";
+  const currentStatusClass = currentPageError
+    ? "status-pill--danger"
+    : useByokMode
+      ? "status-pill--byok"
+      : useDemoData
+        ? "status-pill--demo"
+        : "status-pill--live";
+  const currentStatusLabel = currentPageError
+    ? activeTab === "Settings"
+      ? "Settings error"
+      : "Chat error"
+    : useByokMode
+      ? "BYOK"
+      : useDemoData
+        ? "Demo"
+        : "Live";
+
+  async function handleSaveOpenrouterKey() {
+    setSavingProviderConfig(true);
+    setSettingsError("");
+    try {
+      const nextConfig = await updateOpenRouterApiKey(openrouterDraft, { useDemo: false });
+      const [healthData, statsData] = await Promise.all([getHealth({ useDemo: false }), getStats({ useDemo: false })]);
+      setProviderConfig(nextConfig);
+      setHealth(healthData);
+      setStats(statsData);
+      setOpenrouterDraft("");
+      setSystemWarning("");
+    } catch (err) {
+      setSettingsError(err?.payload?.error?.message || err.message || "Failed to save OpenRouter key");
+    } finally {
+      setSavingProviderConfig(false);
+    }
+  }
+
+  async function handleClearOpenrouterKey() {
+    setSavingProviderConfig(true);
+    setSettingsError("");
+    try {
+      const nextConfig = await updateOpenRouterApiKey("", { useDemo: false });
+      const [healthData, statsData] = await Promise.all([getHealth({ useDemo: false }), getStats({ useDemo: false })]);
+      setProviderConfig(nextConfig);
+      setHealth(healthData);
+      setStats(statsData);
+      setOpenrouterDraft("");
+      setSystemWarning("");
+    } catch (err) {
+      setSettingsError(err?.payload?.error?.message || err.message || "Failed to clear OpenRouter key");
+    } finally {
+      setSavingProviderConfig(false);
+    }
+  }
 
   let page = null;
   if (activeTab === "Chat") {
@@ -633,9 +684,32 @@ export default function App() {
       />
     );
   } else if (activeTab === "Dashboard") {
-    page = <Dashboard stats={stats} />;
+    page = (
+      <Dashboard
+        stats={stats}
+        showProviderConfig={false}
+        providerConfig={effectiveProviderConfig}
+        openrouterDraft={openrouterDraft}
+        onOpenrouterDraftChange={setOpenrouterDraft}
+        onSaveOpenrouterKey={handleSaveOpenrouterKey}
+        onClearOpenrouterKey={handleClearOpenrouterKey}
+        savingProviderConfig={savingProviderConfig}
+      />
+    );
   } else if (activeTab === "Scoring") {
     page = <Scoring stats={stats} />;
+  } else if (activeTab === "Settings") {
+    page = (
+      <Settings
+        health={health}
+        providerConfig={effectiveProviderConfig}
+        openrouterDraft={openrouterDraft}
+        onOpenrouterDraftChange={setOpenrouterDraft}
+        onSaveOpenrouterKey={handleSaveOpenrouterKey}
+        onClearOpenrouterKey={handleClearOpenrouterKey}
+        savingProviderConfig={savingProviderConfig}
+      />
+    );
   } else {
     page = <Logs logs={logs} loading={loading} />;
   }
@@ -653,13 +727,7 @@ export default function App() {
           </div>
         </div>
         <div className="topbar__status">
-          <span
-            className={`status-pill ${
-              error ? "status-pill--danger" : useByokMode ? "status-pill--byok" : useDemoData ? "status-pill--demo" : "status-pill--live"
-            }`}
-          >
-            {error ? "Chat error" : useByokMode ? "BYOK" : useDemoData ? "Demo" : "Live"}
-          </span>
+          <span className={`status-pill ${currentStatusClass}`}>{currentStatusLabel}</span>
         </div>
       </header>
 
@@ -690,16 +758,16 @@ export default function App() {
         />
       ) : null}
 
-      {error ? <div className="error-banner">{error}</div> : null}
-      {!error && useDemoData ? (
+      {currentPageError ? <div className="error-banner">{currentPageError}</div> : null}
+      {!currentPageError && useDemoData ? (
         <div className="warning-banner">
           Public demo mode. This site uses bundled sample data and does not expose private logs or live backend traffic.
         </div>
       ) : null}
-      {!error && systemWarning ? <div className="warning-banner">{systemWarning}</div> : null}
+      {!currentPageError && systemWarning && activeTab !== "Chat" && activeTab !== "Settings" ? (
+        <div className="warning-banner">{systemWarning}</div>
+      ) : null}
 
-      <RuntimeStrip health={health} publicMode={publicMode} byokConfig={byokConfig} />
-      {activeTab !== "Logs" ? <Metrics stats={stats} /> : null}
       {page}
     </div>
   );

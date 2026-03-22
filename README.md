@@ -52,6 +52,67 @@ I did not add extra redundant variants beyond dark, print, and icon.
 
 ![Scoring view](docs/screens/scoring.png)
 
+## Quick Install
+
+ClawHelm now includes platform installers that set up the Python environment, frontend dependencies, default `.env`, and a local settings file with minimal input.
+
+### macOS / Linux
+
+```bash
+git clone https://github.com/YugantM/clawhelm.git
+cd clawhelm
+./install/install.sh --openrouter-api-key YOUR_OPENROUTER_KEY
+./scripts/run_dashboard.sh
+```
+
+### Windows PowerShell
+
+```powershell
+git clone https://github.com/YugantM/clawhelm.git
+cd clawhelm
+.\install\install.ps1 --openrouter-api-key YOUR_OPENROUTER_KEY
+.\scripts\run_dashboard.ps1
+```
+
+### Windows CMD
+
+```bat
+git clone https://github.com/YugantM/clawhelm.git
+cd clawhelm
+install\install.bat --openrouter-api-key YOUR_OPENROUTER_KEY
+```
+
+Installer behavior:
+
+- creates `.venv`
+- installs backend dependencies from `requirements.txt`
+- installs frontend dependencies in `frontend/`
+- creates `.env` from `.env.example` if needed
+- writes local provider settings to `.clawhelm/settings.json`
+
+## Provider Key Configuration
+
+You no longer need to rely only on shell environment variables for OpenRouter.
+
+ClawHelm now supports a persisted local settings file:
+
+- path: `.clawhelm/settings.json`
+- managed from the Dashboard tab under `Provider Keys`
+
+Priority order for API keys:
+
+1. environment variable
+   - `OPENROUTER_API_KEY`
+   - `PROVIDER_API_KEY`
+2. local settings file
+   - `.clawhelm/settings.json`
+
+That means:
+
+- power users can still use env vars
+- most local users can just paste the OpenRouter key in the dashboard once
+- routing picks it up immediately without restarting the shell
+
 ## What Clawhelm Solves
 
 OpenClaw can point at an OpenAI-compatible `base_url`, but that only gives you transport compatibility. It does not give you routing, provider abstraction, cost visibility, actual model attribution, or fallback transparency.

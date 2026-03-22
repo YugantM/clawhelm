@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from .performance import get_successful_models
+from .settings import settings_store
 
 
 @dataclass(slots=True)
@@ -130,7 +131,7 @@ class ModelRegistry:
             return self.snapshot()
 
     async def _fetch_openrouter_models(self, client: httpx.AsyncClient) -> None:
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = settings_store.get_provider_api_key("openrouter")
         if not api_key:
             return
 
@@ -166,11 +167,11 @@ class ModelRegistry:
 
     @staticmethod
     def _openai_enabled() -> bool:
-        return bool(os.getenv("PROVIDER_API_KEY")) and os.getenv("ALLOW_OPENAI_ROUTING", "true").lower() == "true"
+        return bool(settings_store.get_provider_api_key("openai")) and os.getenv("ALLOW_OPENAI_ROUTING", "true").lower() == "true"
 
     @staticmethod
     def _openrouter_enabled() -> bool:
-        return bool(os.getenv("OPENROUTER_API_KEY")) and os.getenv("ALLOW_OPENROUTER_ROUTING", "true").lower() == "true"
+        return bool(settings_store.get_provider_api_key("openrouter")) and os.getenv("ALLOW_OPENROUTER_ROUTING", "true").lower() == "true"
 
 
 model_registry = ModelRegistry()

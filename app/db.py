@@ -34,6 +34,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
+                    request_source TEXT,
                     original_model TEXT,
                     selected_model TEXT,
                     actual_model TEXT,
@@ -54,6 +55,7 @@ class Database:
                 """
             )
             self._ensure_column(connection, "original_model", "TEXT")
+            self._ensure_column(connection, "request_source", "TEXT")
             self._ensure_column(connection, "selected_model", "TEXT")
             self._ensure_column(connection, "actual_model", "TEXT")
             self._ensure_column(connection, "model_display_name", "TEXT")
@@ -110,6 +112,7 @@ class Database:
     async def insert_log(
         self,
         *,
+        request_source: str | None,
         original_model: str | None,
         selected_model: str | None,
         actual_model: str | None,
@@ -129,6 +132,7 @@ class Database:
     ) -> None:
         await asyncio.to_thread(
             self._insert_log_sync,
+            request_source,
             original_model,
             selected_model,
             actual_model,
@@ -149,6 +153,7 @@ class Database:
 
     def _insert_log_sync(
         self,
+        request_source: str | None,
         original_model: str | None,
         selected_model: str | None,
         actual_model: str | None,
@@ -171,6 +176,7 @@ class Database:
                 """
                 INSERT INTO logs (
                     timestamp,
+                    request_source,
                     original_model,
                     selected_model,
                     actual_model,
@@ -188,10 +194,11 @@ class Database:
                     total_tokens,
                     estimated_cost
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.now(timezone.utc).isoformat(),
+                    request_source,
                     original_model,
                     selected_model,
                     actual_model,
@@ -223,6 +230,7 @@ class Database:
                 SELECT
                     id,
                     timestamp,
+                    request_source,
                     original_model,
                     selected_model,
                     actual_model,
@@ -316,6 +324,7 @@ class Database:
         return LogEntry(
             id=row["id"],
             timestamp=datetime.fromisoformat(row["timestamp"]),
+            request_source=row["request_source"],
             original_model=row["original_model"],
             selected_model=row["selected_model"],
             actual_model=row["actual_model"] or row["selected_model"],

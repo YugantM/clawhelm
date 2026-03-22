@@ -9,9 +9,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import db
-from .models import LogEntry, StatsResponse
+from .models import LogEntry, ProviderApiKeyUpdate, ProviderConfigResponse, StatsResponse
 from .models_registry import model_registry
 from .proxy import forward_chat_completion
+from .settings import settings_store
 
 
 load_dotenv()
@@ -59,6 +60,22 @@ async def get_stats():
     return await db.get_stats()
 
 
+@app.get("/config/providers", response_model=ProviderConfigResponse)
+async def get_provider_config():
+    return await settings_store.get_provider_view()
+
+
+@app.put("/config/providers/openrouter", response_model=ProviderConfigResponse)
+async def update_openrouter_provider_config(payload: ProviderApiKeyUpdate, request: Request):
+    result = await settings_store.set_provider_api_key("openrouter", payload.api_key)
+    client: httpx.AsyncClient = request.app.state.http_client
+    try:
+        await model_registry.refresh(client)
+    except httpx.HTTPError:
+        pass
+    return result
+
+
 @app.get("/refresh-models")
 async def refresh_models(request: Request):
     client: httpx.AsyncClient = request.app.state.http_client
@@ -67,6 +84,7 @@ async def refresh_models(request: Request):
 
 @app.get("/health")
 async def health():
+    provider_config = await settings_store.get_provider_view()
     return {
         "status": "ok",
         "service": "clawhelm",
@@ -75,4 +93,6 @@ async def health():
         "allow_openai_routing": os.getenv("ALLOW_OPENAI_ROUTING", "true").lower() == "true",
         "allow_openrouter_routing": os.getenv("ALLOW_OPENROUTER_ROUTING", "true").lower() == "true",
         "db_path": str(db.db_path),
+        "settings_path": provider_config["settings_path"],
+        "openrouter_key_configured": provider_config["providers"]["openrouter"]["configured"],
     }

@@ -32,6 +32,7 @@ export default function LogsTable({ logs, loading }) {
           <thead>
             <tr>
               <th>Timestamp</th>
+              <th>Source</th>
               <th>Display</th>
               <th>Actual Model</th>
               <th>Provider</th>
@@ -45,12 +46,17 @@ export default function LogsTable({ logs, loading }) {
           <tbody>
             {logs.length === 0 ? (
               <tr>
-                <td colSpan="9" className="empty-state">No logs yet.</td>
+                <td colSpan="10" className="empty-state">No logs yet.</td>
               </tr>
             ) : (
               logs.map((log) => (
                 <tr key={log.id} className={log.fallback_used ? "logs-table__row logs-table__row--fallback" : "logs-table__row"}>
                   <td>{formatDate(log.timestamp)}</td>
+                  <td>
+                    <span className={`table-pill table-pill--source table-pill--source-${log.request_source || "external"}`}>
+                      {log.request_source || "external"}
+                    </span>
+                  </td>
                   <td>
                     <div className="model-cell">
                       <span>{log.model_display_name || log.selected_model || "-"}</span>

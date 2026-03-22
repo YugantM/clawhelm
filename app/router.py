@@ -7,6 +7,7 @@ from typing import Any
 
 from .models_registry import ModelRegistry, model_registry
 from .performance import get_model_stats, get_score_components
+from .settings import settings_store
 
 OPENAI_PROVIDER = "openai"
 OPENROUTER_PROVIDER = "openrouter"
@@ -31,7 +32,7 @@ def get_openai_base_url() -> str:
 
 
 def get_openai_api_key() -> str | None:
-    return os.getenv("PROVIDER_API_KEY")
+    return settings_store.get_provider_api_key("openai")
 
 
 def get_openrouter_base_url() -> str:
@@ -39,7 +40,7 @@ def get_openrouter_base_url() -> str:
 
 
 def get_openrouter_api_key() -> str | None:
-    return os.getenv("OPENROUTER_API_KEY")
+    return settings_store.get_provider_api_key("openrouter")
 
 
 def encode_request_body(request_body: dict[str, Any]) -> bytes:

@@ -18,6 +18,7 @@ export default function Message({ role, content, insight, active, onSelect }) {
           <div className="message-bubble__foot">
             <span>{insight.model_display_name || insight.actual_model || insight.selected_model}</span>
             <span>{insight.provider || "unknown"}</span>
+            {insight.request_source ? <span>{insight.request_source}</span> : null}
             {scoreLabel ? <span>{scoreLabel}</span> : null}
           </div>
         ) : null}
