@@ -2,6 +2,12 @@
 
 ![ClawHelm logo](frontend/public/clawhelm-logo-dark.svg)
 
+[![License](https://img.shields.io/github/license/YugantM/clawhelm)](LICENSE)
+[![Pages](https://img.shields.io/github/actions/workflow/status/YugantM/clawhelm/deploy-pages.yml?branch=main&label=pages)](https://github.com/YugantM/clawhelm/actions/workflows/deploy-pages.yml)
+[![Live Demo](https://img.shields.io/badge/demo-live-22c55e)](https://yugantm.github.io/clawhelm/)
+
+[GitHub Repository](https://github.com/YugantM/clawhelm) · [Live Demo](https://yugantm.github.io/clawhelm/) · [Pages Workflow Run](https://github.com/YugantM/clawhelm/actions/runs/23403839069)
+
 Clawhelm is an OpenAI-compatible proxy and routing control layer for OpenClaw. It accepts normal OpenAI chat completion requests, selects a provider and model, forwards the request, returns the upstream response transparently, and records enough routing intelligence to explain why a request was sent where it was sent.
 
 It currently combines:
