@@ -155,6 +155,12 @@ textarea {
   border: 1px solid rgba(52, 211, 153, 0.24);
 }
 
+.status-pill--demo {
+  background: rgba(120, 53, 15, 0.22);
+  color: #fde68a;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
 .status-pill--danger {
   background: rgba(127, 29, 29, 0.24);
   color: #fecaca;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getLogs, getStats, postChat } from "./api";
 import Metrics from "./components/Metrics";
+import { DEMO_MODE } from "./demoData";
 import ChatPage from "./pages/ChatPage";
 import Dashboard from "./pages/Dashboard";
 import Logs from "./pages/Logs";
@@ -370,8 +371,12 @@ export default function App() {
           </div>
         </div>
         <div className="topbar__status">
-          <span className={`status-pill ${error ? "status-pill--danger" : "status-pill--live"}`}>
-            {error ? "Chat error" : "Live"}
+          <span
+            className={`status-pill ${
+              error ? "status-pill--danger" : DEMO_MODE ? "status-pill--demo" : "status-pill--live"
+            }`}
+          >
+            {error ? "Chat error" : DEMO_MODE ? "Demo" : "Live"}
           </span>
         </div>
       </header>
@@ -395,6 +400,11 @@ export default function App() {
       </nav>
 
       {error ? <div className="error-banner">{error}</div> : null}
+      {!error && DEMO_MODE ? (
+        <div className="warning-banner">
+          Public demo mode. This site uses bundled sample data and does not expose private logs or live backend traffic.
+        </div>
+      ) : null}
       {!error && systemWarning ? <div className="warning-banner">{systemWarning}</div> : null}
 
       {activeTab !== "Logs" ? <Metrics stats={stats} /> : null}
