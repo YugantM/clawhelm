@@ -23,9 +23,6 @@ export default function Chat({
   const [input, setInput] = useState("");
   const [modelOptions, setModelOptions] = useState([
     { id: "auto", label: "Auto (recommended)", endpoint: "/chat" },
-    { id: "deepseek", label: "DeepSeek (free)", endpoint: "/chat" },
-    { id: "mistral", label: "Mistral (free)", endpoint: "/chat" },
-    { id: "openchat", label: "OpenChat (free)", endpoint: "/chat" },
   ]);
   const [selectedModel, setSelectedModel] = useState(() => {
     if (typeof window === "undefined") return "auto";
@@ -75,7 +72,7 @@ export default function Chat({
           setModelOptions(normalized);
         }
       } catch {
-        // Keep static defaults if endpoint config is unavailable.
+        // Keep Auto-only fallback if endpoint config is unavailable.
       }
     }
 
