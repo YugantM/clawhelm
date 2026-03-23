@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -40,6 +41,7 @@ from .db import db
 from .models import (
     AuthFormRequest,
     AuthUserResponse,
+    ChatModelOption,
     ChatRequest,
     CheckoutSessionRequest,
     LogEntry,
@@ -52,12 +54,14 @@ from .models import (
 from .models_registry import model_registry
 from .oauth import build_github_auth_url, build_google_auth_url, fetch_github_identity, fetch_google_identity
 from .proxy import detect_request_source, forward_chat_completion
+from .router import is_valid_chat_model
 from .settings import settings_store
 
 load_dotenv()
 
 FREE_DAILY_LIMIT = 20
 OAUTH_STATE_TTL_MINUTES = 10
+chat_request_locks: dict[str, asyncio.Lock] = {}
 
 
 @asynccontextmanager
@@ -224,8 +228,7 @@ async def oauth_start(provider: str, request: Request, redirect_path: str = "/?a
     return RedirectResponse(auth_url, status_code=302)
 
 
-@app.get("/auth/oauth/{provider}/callback")
-async def oauth_callback(provider: str, request: Request, state: str, code: str | None = None, error: str | None = None):
+async def _oauth_callback(provider: str, request: Request, state: str, code: str | None = None, error: str | None = None):
     if provider not in {"google", "github"}:
         raise HTTPException(status_code=404, detail="Unknown OAuth provider")
 
@@ -255,6 +258,16 @@ async def oauth_callback(provider: str, request: Request, state: str, code: str 
         return RedirectResponse(build_frontend_redirect("/?auth=error#Chat"), status_code=302)
 
 
+@app.get("/auth/oauth/{provider}/callback")
+async def oauth_callback(provider: str, request: Request, state: str, code: str | None = None, error: str | None = None):
+    return await _oauth_callback(provider, request, state, code, error)
+
+
+@app.get("/auth/{provider}/callback")
+async def oauth_callback_compat(provider: str, request: Request, state: str, code: str | None = None, error: str | None = None):
+    return await _oauth_callback(provider, request, state, code, error)
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     client: httpx.AsyncClient = request.app.state.http_client
@@ -263,6 +276,8 @@ async def chat_completions(request: Request):
 
 @app.post("/chat")
 async def chat(request: Request, payload: ChatRequest):
+    if not is_valid_chat_model(payload.model):
+        raise HTTPException(status_code=400, detail="Unknown model")
     user = await require_current_user(request)
     allowed, updated_user = await db.consume_user_request(user_id=str(user["id"]), free_daily_limit=FREE_DAILY_LIMIT)
     if updated_user is None:
@@ -314,8 +329,39 @@ async def chat(request: Request, payload: ChatRequest):
             headers={"X-User-Id": str(updated_user["id"]), "X-User-Plan": str(updated_user["plan"])},
         )
 
+    user_lock_key = str(updated_user["id"])
+    user_lock = chat_request_locks.setdefault(user_lock_key, asyncio.Lock())
+    if user_lock.locked():
+        raise HTTPException(status_code=429, detail="Another chat request is already in progress")
+
     client: httpx.AsyncClient = request.app.state.http_client
-    return await forward_chat_completion(request, client)
+    async with user_lock:
+        return await forward_chat_completion(request, client)
+
+
+@app.get("/chat/models", response_model=list[ChatModelOption])
+async def get_chat_models():
+    free_openrouter_models = sorted(
+        model["model_id"]
+        for model in model_registry.get_available_models()
+        if model.get("provider") == "openrouter" and model.get("is_free")
+    )
+
+    options = [
+        ChatModelOption(id="auto", label="Auto", model_id=None, endpoint="/chat", is_free=False, recommended=True),
+    ]
+    options.extend(
+        ChatModelOption(
+            id=model_id,
+            label=model_id,
+            model_id=model_id,
+            endpoint="/chat",
+            is_free=True,
+            recommended=False,
+        )
+        for model_id in free_openrouter_models
+    )
+    return options
 
 
 @app.post("/create-checkout-session")

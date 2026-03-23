@@ -18,7 +18,14 @@ from ..config.feature_flags import ENABLE_MEMORY, ENABLE_PREMIUM_ROUTING, ENABLE
 from ..costs import estimate_cost
 from ..db import db
 from .models_registry import model_registry
-from .router import RouteDecision, encode_request_body, get_route_decisions as get_core_route_decisions, override_model
+from .router import (
+    RouteDecision,
+    encode_request_body,
+    get_direct_route_decision,
+    get_route_decisions as get_core_route_decisions,
+    override_model,
+    resolve_model_alias,
+)
 from ..cloud.premium_router import get_route_decisions as get_premium_route_decisions
 
 TRUNCATE_LIMIT = 500
@@ -35,6 +42,14 @@ HOP_BY_HOP_HEADERS = {
     "content-length",
 }
 
+SYSTEM_IDENTITY_PROMPT = (
+    "You are ClawHelm, an AI system that routes queries across multiple models to provide the best answer.\n\n"
+    "Do NOT claim to be ChatGPT or any specific model.\n"
+    "Do NOT mention OpenAI unless explicitly asked.\n\n"
+    "If asked who you are, respond:\n"
+    "\"I\u2019m ClawHelm, an AI system that selects the best models to answer your question.\""
+)
+
 
 def truncate_text(value: str | None, limit: int = TRUNCATE_LIMIT) -> str | None:
     if value is None:
@@ -49,6 +64,18 @@ def stringify_messages(messages: Any) -> str | None:
         return json.dumps(messages, ensure_ascii=True)
     except (TypeError, ValueError):
         return str(messages)
+
+
+def inject_identity_system_message(request_json: dict[str, Any]) -> dict[str, Any]:
+    messages = request_json.get("messages")
+    if not isinstance(messages, list):
+        return request_json
+
+    system_message = {"role": "system", "content": SYSTEM_IDENTITY_PROMPT}
+    return {
+        **request_json,
+        "messages": [system_message, *messages],
+    }
 
 
 def extract_response_content(payload: Any) -> str | None:
@@ -151,7 +178,18 @@ def add_usage_headers(
         headers["X-Usage-Remaining"] = str(remaining)
 
 
-def add_usage_payload(payload: Any, user_id: str | None, usage_summary: Mapping[str, Any] | None, plan: str | None) -> Any:
+def add_usage_payload(
+    payload: Any,
+    user_id: str | None,
+    usage_summary: Mapping[str, Any] | None,
+    plan: str | None,
+    *,
+    selected_model: str | None = None,
+    actual_model: str | None = None,
+    fallback_used: bool | None = None,
+    fallback_from_model: str | None = None,
+    fallback_to_model: str | None = None,
+) -> Any:
     if not isinstance(payload, dict):
         return payload
 
@@ -169,6 +207,16 @@ def add_usage_payload(payload: Any, user_id: str | None, usage_summary: Mapping[
         merged_usage.update(usage_summary)
     if merged_usage:
         response_payload["usage"] = merged_usage
+    if selected_model:
+        response_payload["selected_model"] = selected_model
+    if actual_model:
+        response_payload["actual_model"] = actual_model
+    if fallback_used is not None:
+        response_payload["fallback_used"] = fallback_used
+    if fallback_from_model:
+        response_payload["fallback_from_model"] = fallback_from_model
+    if fallback_to_model:
+        response_payload["fallback_to_model"] = fallback_to_model
 
     return response_payload
 
@@ -237,9 +285,15 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
             original_model = parsed_request.get("model")
             if is_cloud_mode():
                 request_json, session_id = await _prepare_cloud_request(request_json, request)
+            request_json = inject_identity_system_message(request_json)
             prompt = stringify_messages(request_json.get("messages"))
-            ranked_decisions = _pick_route_decisions(request_json)
-            route_decision = ranked_decisions[0] if ranked_decisions else None
+            manual_model = resolve_model_alias(original_model)
+            if manual_model is not None:
+                route_decision = get_direct_route_decision(manual_model)
+                ranked_decisions = [route_decision]
+            else:
+                ranked_decisions = _pick_route_decisions(request_json)
+                route_decision = ranked_decisions[0] if ranked_decisions else None
             if route_decision is None:
                 raise HTTPException(status_code=503, detail="No available models for routing")
             request_json = override_model(request_json, route_decision.model)
@@ -256,6 +310,8 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
     response_text_for_log: str | None = None
     total_tokens: int | None = None
     fallback_used = False
+    fallback_from_model: str | None = None
+    selected_model_for_log: str | None = route_decision.model if route_decision else original_model
     actual_model_for_log: str | None = route_decision.model if route_decision else original_model
 
     async def log_request(
@@ -267,16 +323,15 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
         decision: RouteDecision | None,
         actual_model: str | None,
     ) -> None:
-        selected_model = decision.model if decision else original_model
         await db.insert_log(
             user_id=user_id,
             request_count=request_count,
             session_id=session_id,
             request_source=request_source,
             original_model=original_model,
-            selected_model=selected_model,
-            actual_model=actual_model or selected_model,
-            model_display_name=build_model_display_name(selected_model, actual_model or selected_model),
+            selected_model=selected_model_for_log,
+            actual_model=actual_model or selected_model_for_log,
+            model_display_name=build_model_display_name(selected_model_for_log, actual_model or selected_model_for_log),
             provider=decision.provider if decision else None,
             is_free_model=decision.is_free_model if decision else False,
             model_source=decision.model_source if decision else None,
@@ -288,7 +343,7 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
             response=truncate_text(response_text),
             latency=latency,
             total_tokens=total_tokens_value,
-            estimated_cost=estimate_cost(actual_model or selected_model, total_tokens_value),
+            estimated_cost=estimate_cost(actual_model or selected_model_for_log, total_tokens_value),
         )
 
     async def send_request(effective_body: bytes, decision: RouteDecision, *, stream: bool) -> httpx.Response:
@@ -315,6 +370,7 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
     try:
         is_streaming = bool(request_json and request_json.get("stream") is True)
         active_decision = ranked_decisions[0] if ranked_decisions else route_decision
+        fallback_from_model = active_decision.model if active_decision else None
         provider_response = await send_request(request_body, active_decision, stream=is_streaming) if active_decision else None
 
         decision_index = 0
@@ -402,6 +458,17 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
         response_headers = filter_response_headers(provider_response.headers)
         if 200 <= provider_response.status_code < 400:
             enriched_payload = add_usage_payload(response_payload, user_id, usage_summary, plan)
+            enriched_payload = add_usage_payload(
+                enriched_payload,
+                None,
+                None,
+                None,
+                selected_model=original_model,
+                actual_model=actual_model_for_log,
+                fallback_used=fallback_used,
+                fallback_from_model=fallback_from_model if fallback_used else None,
+                fallback_to_model=actual_model_for_log if fallback_used else None,
+            )
             if enriched_payload is not response_payload:
                 response_headers["content-type"] = "application/json"
                 response = Response(

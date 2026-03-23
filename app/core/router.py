@@ -87,6 +87,35 @@ def get_route_decisions(request_body: dict[str, Any] | None, registry: ModelRegi
     return decisions
 
 
+def resolve_model_alias(requested_model: str | None, registry: ModelRegistry = model_registry) -> str | None:
+    if requested_model in {None, "", "auto", "clawhelm-auto"}:
+        return None
+    if registry.get_model(requested_model) is not None:
+        return requested_model
+    return None
+
+
+def is_valid_chat_model(requested_model: str | None, registry: ModelRegistry = model_registry) -> bool:
+    if requested_model in {None, "", "auto", "clawhelm-auto"}:
+        return True
+    return registry.get_model(requested_model) is not None
+
+
+def get_direct_route_decision(model_id: str, registry: ModelRegistry = model_registry) -> RouteDecision:
+    model = registry.get_model(model_id)
+    if model is None:
+        raise ValueError(f"Unknown model: {model_id}")
+    return _build_decision(
+        {
+            "provider": model.provider,
+            "model_id": model.id,
+            "is_free": model.is_free,
+            "source": model.source,
+        },
+        "manual selection",
+    )
+
+
 def _select_preferred_model(prompt_length: int, available_models: list[dict[str, Any]]) -> dict[str, Any]:
     available_ids = {candidate["model_id"]: candidate for candidate in available_models}
     cheap_model = os.getenv("CHEAP_MODEL", "gpt-3.5-turbo")
@@ -123,4 +152,3 @@ def _build_decision(candidate: dict[str, Any], reason: str) -> RouteDecision:
         routing_reason=reason,
         score=None,
     )
-

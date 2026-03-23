@@ -1,9 +1,23 @@
 import ProviderConfigPanel from "../components/ProviderConfigPanel";
 
+function maskEmail(email) {
+  if (typeof email !== "string" || !email.includes("@")) return "hidden";
+  const [namePart, domainPart] = email.split("@");
+  const visibleName = namePart.slice(0, 2);
+  return `${visibleName}${"*".repeat(Math.max(namePart.length - 2, 1))}@${domainPart}`;
+}
+
+function maskUserId(value) {
+  if (typeof value !== "string" || value.length < 6) return "hidden";
+  return `***${value.slice(-6)}`;
+}
+
 function BillingCard({ user, account, health, onCheckout, billingPending }) {
   const isPro = account?.plan === "pro";
   const stripeReady =
     health?.stripe_secret_key_configured && health?.stripe_price_id_configured && health?.stripe_webhook_secret_configured;
+  const maskedUser = maskEmail(user?.email || "");
+  const maskedUserId = maskUserId(account?.user_id || user?.user_id || "");
 
   return (
     <section className="settings-card panel">
@@ -11,11 +25,11 @@ function BillingCard({ user, account, health, onCheckout, billingPending }) {
       <div className="settings-list">
         <div className="settings-list__row">
           <span>User</span>
-          <strong>{user?.email || user?.name || "anonymous"}</strong>
+          <strong>{maskedUser}</strong>
         </div>
         <div className="settings-list__row">
           <span>User ID</span>
-          <strong>{account?.user_id || user?.user_id || "pending"}</strong>
+          <strong>{maskedUserId}</strong>
         </div>
         <div className="settings-list__row">
           <span>Plan</span>

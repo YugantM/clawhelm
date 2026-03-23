@@ -1,28 +1,33 @@
+import MessageMetaTooltip from "./MessageMetaTooltip";
+
 function formatMetaLabel(role) {
   return role === "user" ? "You" : "Clawhelm";
 }
 
 export default function Message({ role, content, insight, active, onSelect }) {
-  const scoreLabel = insight?.routing_score != null ? `score ${insight.routing_score.toFixed(3)}` : null;
-
   return (
     <div className={`message-row message-row--${role}`}>
-      <button
-        type="button"
+      <div
+        role={insight ? "button" : undefined}
+        tabIndex={insight ? 0 : undefined}
         className={`message-bubble message-bubble--${role} ${active ? "message-bubble--active" : ""}`}
         onClick={onSelect}
+        onKeyDown={(event) => {
+          if (!insight) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onSelect();
+          }
+        }}
       >
         <span className="message-bubble__meta">{formatMetaLabel(role)}</span>
         <p>{content}</p>
-        {role === "assistant" && insight ? (
+        {role === "assistant" ? (
           <div className="message-bubble__foot">
-            <span>{insight.model_display_name || insight.actual_model || insight.selected_model}</span>
-            <span>{insight.provider || "unknown"}</span>
-            {insight.request_source ? <span>{insight.request_source}</span> : null}
-            {scoreLabel ? <span>{scoreLabel}</span> : null}
+            <MessageMetaTooltip insight={insight || {}} />
           </div>
         ) : null}
-      </button>
+      </div>
     </div>
   );
 }

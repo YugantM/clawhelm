@@ -17,30 +17,55 @@ function formatScore(value) {
   return value.toFixed(3);
 }
 
-export default function LogsTable({ logs, loading }) {
+function formatTokensPerSecond(tokens, latencySeconds) {
+  if (typeof tokens !== "number" || typeof latencySeconds !== "number" || latencySeconds <= 0) {
+    return "-";
+  }
+  return (tokens / latencySeconds).toFixed(1);
+}
+
+function HeaderWithHelp({ label, help }) {
+  if (!help) return <>{label}</>;
+  return (
+    <span className="th-label">
+      <span className="th-label__text">{label}</span>
+      <span className="th-help" data-help={help} aria-label={`${label}: ${help}`}>
+        ?
+      </span>
+    </span>
+  );
+}
+
+export default function LogsTable({ logs, loading, compact = false }) {
   return (
     <section className="panel">
-      <div className="section-heading">
-        <div>
-          <h2>Request Ledger</h2>
-          <p>Latest proxy activity with selected versus actual model attribution.</p>
+      {!compact ? (
+        <div className="section-heading logs-heading">
+          <div>
+            <h2>Logs</h2>
+            <p>Recent routing outcomes, model usage, and response performance.</p>
+          </div>
+          {loading ? <span className="status-pill">Loading</span> : null}
         </div>
-        {loading ? <span className="status-pill">Loading</span> : null}
-      </div>
+      ) : (
+        <div className="logs-heading--compact">
+          {loading ? <span className="status-pill">Loading</span> : null}
+        </div>
+      )}
       <div className="table-shell">
         <table className="logs-table">
           <thead>
             <tr>
-              <th>Timestamp</th>
-              <th>Source</th>
-              <th>Display</th>
-              <th>Actual Model</th>
+              <th><HeaderWithHelp label="Timestamp" help="When this request completed." /></th>
+              <th><HeaderWithHelp label="Model" help="Requested model and route selection." /></th>
+              <th><HeaderWithHelp label="Actual Model" help="Provider model that finally served the response." /></th>
               <th>Provider</th>
-              <th>Latency</th>
-              <th>Tokens</th>
+              <th><HeaderWithHelp label="Latency" help="End-to-end request duration." /></th>
+              <th><HeaderWithHelp label="Tokens" help="Total input + output tokens." /></th>
+              <th><HeaderWithHelp label="Tok/Sec" help="Throughput: total tokens divided by latency." /></th>
               <th>Cost</th>
               <th>Reason</th>
-              <th>Fallback</th>
+              <th><HeaderWithHelp label="Fallback" help="Escalated means initial route failed and moved to another model." /></th>
             </tr>
           </thead>
           <tbody>
@@ -52,11 +77,6 @@ export default function LogsTable({ logs, loading }) {
               logs.map((log) => (
                 <tr key={log.id} className={log.fallback_used ? "logs-table__row logs-table__row--fallback" : "logs-table__row"}>
                   <td>{formatDate(log.timestamp)}</td>
-                  <td>
-                    <span className={`table-pill table-pill--source table-pill--source-${log.request_source || "external"}`}>
-                      {log.request_source || "external"}
-                    </span>
-                  </td>
                   <td>
                     <div className="model-cell">
                       <span>{log.model_display_name || log.selected_model || "-"}</span>
@@ -73,6 +93,7 @@ export default function LogsTable({ logs, loading }) {
                   </td>
                   <td>{formatLatency(log.latency)}</td>
                   <td>{log.total_tokens ?? "-"}</td>
+                  <td>{formatTokensPerSecond(log.total_tokens, log.latency)}</td>
                   <td>{formatCurrency(log.estimated_cost)}</td>
                   <td>{log.routing_reason || "-"}</td>
                   <td>{log.fallback_used ? "Escalated" : "Direct"}</td>

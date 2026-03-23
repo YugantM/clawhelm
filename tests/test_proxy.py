@@ -6,6 +6,7 @@ import json
 import os
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -324,6 +325,46 @@ async def test_chat_generates_user_id_and_returns_usage_metadata(test_client: ht
 
 
 @pytest.mark.asyncio
+async def test_chat_allows_manual_model_selection(test_client: httpx.AsyncClient):
+    await signup_user(test_client, email="manual-model@example.com")
+    model_id = "meta-llama/llama-3.3-8b-instruct:free"
+    response = await test_client.post(
+        "/chat",
+        json={
+            "message": "manual choice",
+            "model": model_id,
+            "session_id": "manual-model-session",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["selected_model"] == model_id
+    assert payload["actual_model"] == model_id
+
+    logs_response = await test_client.get("/logs")
+    logs = logs_response.json()
+    assert logs[0]["selected_model"] == model_id
+    assert logs[0]["actual_model"] == model_id
+
+
+@pytest.mark.asyncio
+async def test_chat_rejects_unknown_manual_model(test_client: httpx.AsyncClient):
+    await signup_user(test_client, email="invalid-model@example.com")
+    response = await test_client.post(
+        "/chat",
+        json={
+            "message": "bad model",
+            "model": "not-a-model",
+            "session_id": "invalid-model-session",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unknown model"
+
+
+@pytest.mark.asyncio
 async def test_chat_blocks_requests_after_daily_free_limit(test_client: httpx.AsyncClient):
     auth_user = await signup_user(test_client, email="free-tier@example.com")
 
@@ -474,7 +515,11 @@ async def test_oauth_start_redirects_to_provider(test_client: httpx.AsyncClient)
     google_response = await test_client.get("/auth/oauth/google/start", follow_redirects=False)
     assert google_response.status_code == 302
     assert "accounts.google.com" in google_response.headers["location"]
+    google_params = parse_qs(urlparse(google_response.headers["location"]).query)
+    assert google_params["redirect_uri"] == ["http://testserver/auth/oauth/google/callback"]
 
     github_response = await test_client.get("/auth/oauth/github/start", follow_redirects=False)
     assert github_response.status_code == 302
     assert "github.com/login/oauth/authorize" in github_response.headers["location"]
+    github_params = parse_qs(urlparse(github_response.headers["location"]).query)
+    assert github_params["redirect_uri"] == ["http://testserver/auth/oauth/github/callback"]

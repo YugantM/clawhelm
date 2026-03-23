@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createCheckoutSession,
   getHealth,
@@ -10,6 +10,7 @@ import {
   postChat,
   postChatByok,
   postCloudChat,
+  resolveModelAlias,
   login,
   logout,
   signup,
@@ -20,11 +21,17 @@ import ChatPage from "./pages/ChatPage";
 import Dashboard from "./pages/Dashboard";
 import LoginPage from "./pages/LoginPage";
 import Logs from "./pages/Logs";
-import Scoring from "./pages/Scoring";
 import Settings from "./pages/Settings";
 
 const REFRESH_INTERVAL_MS = 4000;
-const TABS = ["Chat", "Dashboard", "Logs", "Scoring", "Settings"];
+let globalPendingSend = false;
+const TABS = ["Chat", "Dashboard", "Logs", "Settings"];
+const MENU_ITEMS = [
+  { id: "chat", label: "Chat", tab: "Chat" },
+  { id: "dashboard", label: "Dashboard", tab: "Dashboard" },
+  { id: "logs", label: "Logs", tab: "Logs" },
+  { id: "settings", label: "Settings", tab: "Settings" },
+];
 const STORAGE_KEYS = {
   publicMode: "clawhelm_public_mode",
   byokProvider: "clawhelm_byok_provider",
@@ -34,17 +41,17 @@ const STORAGE_KEYS = {
   cloudSessionId: "clawhelm_cloud_session_id",
 };
 
-function getTabFromHash() {
+function getNavigationFromHash() {
   const hashValue = window.location.hash.replace(/^#/, "").trim();
-  return TABS.includes(hashValue) ? hashValue : "Chat";
+  if (hashValue === "Scoring") return { tab: "Dashboard" };
+  if (TABS.includes(hashValue)) {
+    return { tab: hashValue };
+  }
+  return { tab: "Chat" };
 }
 
 function getInitialPublicMode() {
-  if (!DEMO_MODE || typeof window === "undefined") {
-    return "live";
-  }
-
-  return window.sessionStorage.getItem(STORAGE_KEYS.publicMode) || "demo";
+  return "live";
 }
 
 function getInitialByokConfig() {
@@ -72,6 +79,13 @@ function createSessionId() {
     return crypto.randomUUID();
   }
   return `session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function createMessageId(prefix) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 function getInitialChatMode() {
@@ -315,14 +329,44 @@ function buildEffectiveProviderConfig(providerConfig, health) {
   };
 }
 
-function PublicAccessPanel({ publicMode, onPublicModeChange, byokConfig, onByokConfigChange }) {
+function inferProviderFromModel(modelId) {
+  if (!modelId || modelId === "clawhelm-auto") return null;
+  if (modelId.startsWith("openrouter/") || modelId.endsWith(":free")) {
+    return "openrouter";
+  }
+  return "openai";
+}
+
+function buildFallbackInsight(response, selectedModel) {
+  const resolvedSelectedModel = resolveModelAlias(selectedModel || "auto");
+  const selectedValue = response?.selected_model || resolvedSelectedModel || "clawhelm-auto";
+  const actualValue = response?.actual_model || response?.model || selectedValue;
+  const provider = inferProviderFromModel(actualValue) || inferProviderFromModel(selectedValue) || "unknown";
+  const fallbackUsed = Boolean(response?.fallback_used);
+  const fallbackFromModel = response?.fallback_from_model || null;
+  const fallbackToModel = response?.fallback_to_model || (fallbackUsed ? actualValue : null);
+
+  return {
+    id: createMessageId("insight"),
+    timestamp: new Date().toISOString(),
+    selected_model: selectedValue,
+    actual_model: actualValue,
+    model_display_name: actualValue !== selectedValue ? `${selectedValue} -> ${actualValue}` : actualValue,
+    provider,
+    routing_reason: "pending log sync",
+    latency: typeof response?.latency === "number" ? response.latency : null,
+    total_tokens: response?.usage?.total_tokens ?? null,
+    fallback_used: fallbackUsed,
+    fallback_from_model: fallbackFromModel,
+    fallback_to_model: fallbackToModel,
+    response: normalizeAssistantContent(response, null),
+  };
+}
+
+function PublicAccessPanel({ id, publicMode, onPublicModeChange, byokConfig, onByokConfigChange }) {
   return (
-    <section className="access-panel panel">
+    <section className="access-panel panel" id={id}>
       <div className="access-panel__header">
-        <div>
-          <h2>Public access</h2>
-          <p>GitHub Pages stays safe by default. Switch to your own key if you want real provider responses in the browser.</p>
-        </div>
         <div className="access-toggle" role="tablist" aria-label="Public access mode">
           <button
             type="button"
@@ -368,23 +412,18 @@ function PublicAccessPanel({ publicMode, onPublicModeChange, byokConfig, onByokC
               type="password"
               value={byokConfig.apiKey}
               onChange={(event) => onByokConfigChange({ apiKey: event.target.value })}
-              placeholder="Stored only in this browser session"
+              placeholder="Paste your OpenRouter or provider key"
             />
           </label>
-          <p className="access-panel__note">
-            Keys stay in sessionStorage for this browser tab session and are sent directly to the provider, not to the ClawHelm demo host.
-          </p>
         </div>
-      ) : (
-        <p className="access-panel__note">Demo mode uses bundled sample data only. No live backend traffic or private logs are exposed.</p>
-      )}
+      ) : null}
     </section>
   );
 }
 
 export default function App() {
   const iconSrc = `${import.meta.env.BASE_URL}clawhelm-icon.svg`;
-  const [activeTab, setActiveTab] = useState(getTabFromHash);
+  const [activeTab, setActiveTab] = useState(() => getNavigationFromHash().tab);
   const [publicMode, setPublicMode] = useState(getInitialPublicMode);
   const [byokConfig, setByokConfig] = useState(getInitialByokConfig);
   const [chatMode, setChatMode] = useState(getInitialChatMode);
@@ -408,12 +447,17 @@ export default function App() {
   const [authPending, setAuthPending] = useState(false);
   const [authError, setAuthError] = useState("");
   const [billingPending, setBillingPending] = useState(false);
-  const [pendingPrompt, setPendingPrompt] = useState(null);
-  const [pendingAssistantId, setPendingAssistantId] = useState(null);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(420);
+  const pendingChatRef = useRef(false);
+  const messagesRef = useRef([]);
+  const isResizingPanelRef = useRef(false);
 
-  const useDemoData = DEMO_MODE && publicMode === "demo";
-  const useByokMode = DEMO_MODE && publicMode === "byok";
-  const accountBillingMode = Boolean(currentUser) && !useDemoData && !useByokMode;
+  const isAuthenticated = Boolean(currentUser);
+  const showFullUi = isAuthenticated;
+  const useDemoData = false;
+  const useByokMode = false;
+  const accountBillingMode = isAuthenticated && !useDemoData && !useByokMode;
   const runtimeChatMode = accountBillingMode ? "cloud" : chatMode;
   const activeModeKey = useDemoData || useByokMode ? "local" : runtimeChatMode;
   const messages = activeModeKey === "cloud" ? cloudMessages : localMessages;
@@ -421,6 +465,10 @@ export default function App() {
   const selectedInsightId = selectedInsightIds[activeModeKey];
   const setSelectedInsightId = (value) =>
     setSelectedInsightIds((current) => ({ ...current, [activeModeKey]: value }));
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -446,6 +494,40 @@ export default function App() {
   }, [byokConfig]);
 
   useEffect(() => {
+    function handleWindowClick() {
+      setAccountMenuOpen(false);
+    }
+
+    window.addEventListener("click", handleWindowClick);
+    return () => {
+      window.removeEventListener("click", handleWindowClick);
+    };
+  }, []);
+
+  useEffect(() => {
+    function handlePointerMove(event) {
+      if (!isResizingPanelRef.current) return;
+      const minWidth = 320;
+      const maxWidth = Math.min(760, window.innerWidth - 420);
+      const computed = Math.max(minWidth, Math.min(maxWidth, window.innerWidth - event.clientX - 18));
+      setPanelWidth(computed);
+    }
+
+    function stopResize() {
+      isResizingPanelRef.current = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    }
+
+    window.addEventListener("mousemove", handlePointerMove);
+    window.addEventListener("mouseup", stopResize);
+    return () => {
+      window.removeEventListener("mousemove", handlePointerMove);
+      window.removeEventListener("mouseup", stopResize);
+    };
+  }, []);
+
+  useEffect(() => {
     if (useDemoData) {
       setLocalMessages([]);
       setCloudMessages([]);
@@ -454,17 +536,17 @@ export default function App() {
   }, [useDemoData]);
 
   useEffect(() => {
-    setPendingPrompt(null);
-    setPendingAssistantId(null);
     setPendingChat(false);
     setChatError("");
   }, [chatMode]);
 
   useEffect(() => {
     function syncTabFromHash() {
-      setActiveTab(getTabFromHash());
+      const next = getNavigationFromHash();
+      setActiveTab(next.tab);
     }
 
+    syncTabFromHash();
     window.addEventListener("hashchange", syncTabFromHash);
     return () => {
       window.removeEventListener("hashchange", syncTabFromHash);
@@ -532,36 +614,6 @@ export default function App() {
   }, [byokConfig.provider, currentUser, logs, useByokMode, useDemoData]);
 
   useEffect(() => {
-    if (!pendingPrompt || !pendingAssistantId || logs.length === 0 || useByokMode || useDemoData) {
-      return;
-    }
-
-    const latestInsight = logs[0];
-    const loggedPrompt = latestInsight?.prompt || "";
-    if (!loggedPrompt.includes(pendingPrompt)) {
-      return;
-    }
-
-    const resolvedAssistantContent = latestInsight.response || "No assistant content returned.";
-    setMessages((current) => {
-      const existingAssistant = current.find((message) => message.id === pendingAssistantId);
-      if (existingAssistant) {
-        return current.map((message) =>
-          message.id === pendingAssistantId
-            ? { ...message, content: resolvedAssistantContent, insight: latestInsight }
-            : message,
-        );
-      }
-
-      return [...current, createMessage(pendingAssistantId, "assistant", resolvedAssistantContent, latestInsight)];
-    });
-
-    setSelectedInsightId(latestInsight.id);
-    setPendingPrompt(null);
-    setPendingAssistantId(null);
-  }, [logs, pendingAssistantId, pendingPrompt, useByokMode, useDemoData]);
-
-  useEffect(() => {
     let active = true;
 
     async function loadAccount() {
@@ -594,16 +646,35 @@ export default function App() {
     };
   }, [billingPending, useByokMode, useDemoData]);
 
-  async function handleSend(prompt) {
+  async function handleSend(prompt, selectedModel = "auto") {
+    if (pendingChatRef.current || globalPendingSend) {
+      return;
+    }
+
+    if (isAuthenticated && selectedModel !== "auto") {
+      const resolvedModel = resolveModelAlias(selectedModel);
+      const requiredProvider = inferProviderFromModel(resolvedModel);
+      const isProviderConfigured = requiredProvider ? Boolean(effectiveProviderConfig?.providers?.[requiredProvider]?.configured) : true;
+
+      if (!isProviderConfigured) {
+        setSettingsError(
+          `Configure ${requiredProvider === "openrouter" ? "OpenRouter" : "OpenAI"} API key in Settings before using ${selectedModel}.`,
+        );
+        setActiveTab("Settings");
+        window.location.hash = "Settings";
+        return;
+      }
+    }
+
+    pendingChatRef.current = true;
+    globalPendingSend = true;
     const previousTopLogId = logs[0]?.id ?? null;
-    const userMessage = createMessage(`user-${Date.now()}`, "user", prompt);
-    const assistantMessageId = `assistant-${Date.now()}`;
-    const nextMessages = [...messages, userMessage];
+    const userMessage = createMessage(createMessageId("user"), "user", prompt);
+    const assistantMessageId = createMessageId("assistant");
+    const nextMessages = [...messagesRef.current, userMessage];
     setMessages(nextMessages);
     setPendingChat(true);
     setChatError("");
-    setPendingPrompt(prompt);
-    setPendingAssistantId(assistantMessageId);
 
     try {
       if (useByokMode) {
@@ -611,22 +682,21 @@ export default function App() {
         const response = await postChatByok({
           provider: byokConfig.provider,
           apiKey: byokConfig.apiKey,
-          model: byokConfig.model,
+          model: selectedModel === "auto" ? byokConfig.model : resolveModelAlias(selectedModel),
           messages: nextMessages.map((message) => ({ role: message.role, content: message.content })),
         });
         const insight = buildByokInsight({
           response,
           provider: byokConfig.provider,
-          model: byokConfig.model,
+          model: selectedModel === "auto" ? byokConfig.model : resolveModelAlias(selectedModel),
           prompt: nextMessages.map((message) => ({ role: message.role, content: message.content })),
           startedAt,
         });
         const assistantContent = normalizeAssistantContent(response, insight);
         setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantContent, insight)]);
+        setPendingChat(false);
         setLogs((current) => [insight, ...current].slice(0, 50));
         setSelectedInsightId(insight.id);
-        setPendingPrompt(null);
-        setPendingAssistantId(null);
         return;
       }
 
@@ -636,7 +706,7 @@ export default function App() {
           setCloudSessionId(sessionId);
         }
 
-        const response = await postCloudChat({ message: prompt, sessionId }, { useDemo: false });
+        const response = await postCloudChat({ message: prompt, sessionId, model: selectedModel }, { useDemo: false });
         if (response?.user_id) {
           setAccount((current) => ({
             user_id: response.user_id,
@@ -650,10 +720,13 @@ export default function App() {
           }));
         }
         const optimisticAssistantContent = normalizeAssistantContent(response, null);
-        setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", optimisticAssistantContent, null)]);
+        const fallbackInsight = buildFallbackInsight(response, selectedModel);
+        setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", optimisticAssistantContent, fallbackInsight)]);
+        setPendingChat(false);
+        setSelectedInsightId(fallbackInsight.id);
 
         try {
-          const { logsData, matchingLog } = await waitForSessionLog(sessionId, previousTopLogId);
+          const { logsData } = await waitForSessionLog(sessionId, previousTopLogId);
           setLogs(logsData);
           try {
             const [statsData, healthData] = await Promise.all([getStats({ useDemo: false }), getHealth({ useDemo: false })]);
@@ -663,21 +736,6 @@ export default function App() {
           } catch (statsError) {
             setSystemWarning(statsError.message || "Metrics refresh delayed");
           }
-
-          const latestInsight = matchingLog || null;
-          const resolvedAssistantContent = normalizeAssistantContent(response, latestInsight);
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === assistantMessageId
-                ? { ...message, content: resolvedAssistantContent, insight: latestInsight }
-                : message,
-            ),
-          );
-          if (latestInsight) {
-            setSelectedInsightId(latestInsight.id);
-          }
-          setPendingPrompt(null);
-          setPendingAssistantId(null);
         } catch (refreshError) {
           setSystemWarning(refreshError.message || "Cloud log refresh delayed");
         }
@@ -685,11 +743,16 @@ export default function App() {
         return;
       }
 
-      const response = await postChat(nextMessages.map((message) => ({ role: message.role, content: message.content })), {
-        useDemo: useDemoData,
-      });
+      const response = await postChat(
+        nextMessages.map((message) => ({ role: message.role, content: message.content })),
+        { model: selectedModel },
+        { useDemo: useDemoData },
+      );
       const optimisticAssistantContent = normalizeAssistantContent(response, null);
-      setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", optimisticAssistantContent, null)]);
+      const fallbackInsight = buildFallbackInsight(response, selectedModel);
+      setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", optimisticAssistantContent, fallbackInsight)]);
+      setPendingChat(false);
+      setSelectedInsightId(fallbackInsight.id);
 
       if (useDemoData) {
         const insight = {
@@ -713,8 +776,6 @@ export default function App() {
           ),
         );
         setSelectedInsightId(insight.id);
-        setPendingPrompt(null);
-        setPendingAssistantId(null);
         return;
       }
 
@@ -729,34 +790,8 @@ export default function App() {
         } catch (statsError) {
           setSystemWarning(statsError.message || "Metrics refresh delayed");
         }
-        const latestInsight = logsData[0] || null;
-        const resolvedAssistantContent = normalizeAssistantContent(response, latestInsight);
-
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantMessageId
-              ? { ...message, content: resolvedAssistantContent, insight: latestInsight }
-              : message,
-          ),
-        );
-
-        if (latestInsight) {
-          setSelectedInsightId(latestInsight.id);
-        }
-        setPendingPrompt(null);
-        setPendingAssistantId(null);
       } catch (refreshError) {
         setSystemWarning(refreshError.message || "Log refresh delayed");
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantMessageId
-              ? {
-                  ...message,
-                  content: normalizeAssistantContent(response, logs[0] || null),
-                }
-              : message,
-          ),
-        );
       }
     } catch (err) {
       const errorPayload = err?.payload || null;
@@ -777,59 +812,35 @@ export default function App() {
         const insight = buildByokInsight({
           response: errorPayload || { raw_text: assistantErrorContent },
           provider: byokConfig.provider,
-          model: byokConfig.model,
+          model: selectedModel === "auto" ? byokConfig.model : resolveModelAlias(selectedModel),
           prompt: nextMessages.map((message) => ({ role: message.role, content: message.content })),
           startedAt,
           statusCode: err?.status || 500,
         });
         setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, insight)]);
+        setPendingChat(false);
         setLogs((current) => [insight, ...current].slice(0, 50));
         setSelectedInsightId(insight.id);
       } else if (runtimeChatMode === "cloud") {
-        setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, null)]);
+        const fallbackInsight = buildFallbackInsight(errorPayload || {}, selectedModel);
+        setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, fallbackInsight)]);
+        setPendingChat(false);
+        setSelectedInsightId(fallbackInsight.id);
         try {
-          const { logsData, matchingLog } = await waitForSessionLog(cloudSessionId, previousTopLogId);
+          const { logsData } = await waitForSessionLog(cloudSessionId, previousTopLogId);
           setLogs(logsData);
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === assistantMessageId
-                ? {
-                    ...message,
-                    content: normalizeAssistantContent(errorPayload || { raw_text: assistantErrorContent }, matchingLog),
-                    insight: matchingLog,
-                  }
-                : message,
-            ),
-          );
-          if (matchingLog) {
-            setSelectedInsightId(matchingLog.id);
-          }
         } catch {
           // Keep assistant error bubble visible even if logs lag behind.
         }
       } else {
-        setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, null)]);
+        const fallbackInsight = buildFallbackInsight(errorPayload || {}, selectedModel);
+        setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, fallbackInsight)]);
+        setPendingChat(false);
+        setSelectedInsightId(fallbackInsight.id);
 
         try {
           const logsData = await waitForLatestLog(previousTopLogId);
           setLogs(logsData);
-
-          const latestInsight = logsData[0] || null;
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === assistantMessageId
-                ? {
-                    ...message,
-                    content: normalizeAssistantContent(errorPayload || { raw_text: assistantErrorContent }, latestInsight),
-                    insight: latestInsight,
-                  }
-                : message,
-            ),
-          );
-
-          if (latestInsight) {
-            setSelectedInsightId(latestInsight.id);
-          }
 
           try {
             const [statsData, healthData] = await Promise.all([getStats({ useDemo: false }), getHealth({ useDemo: false })]);
@@ -849,9 +860,9 @@ export default function App() {
       } else {
         setChatError(err.message || "Failed to send chat request");
       }
-        setPendingPrompt(null);
-        setPendingAssistantId(null);
     } finally {
+      pendingChatRef.current = false;
+      globalPendingSend = false;
       setPendingChat(false);
     }
   }
@@ -861,7 +872,7 @@ export default function App() {
     [logs, messages, selectedInsightId],
   );
   const effectiveProviderConfig = useMemo(() => buildEffectiveProviderConfig(providerConfig, health), [providerConfig, health]);
-  const currentPageError = activeTab === "Chat" ? chatError : activeTab === "Settings" ? settingsError : "";
+  const currentPageError = !showFullUi || activeTab === "Chat" ? chatError : activeTab === "Settings" ? settingsError : "";
   const currentStatusClass = currentPageError
     ? "status-pill--danger"
     : useByokMode
@@ -870,14 +881,16 @@ export default function App() {
         ? "status-pill--demo"
         : "status-pill--live";
   const currentStatusLabel = currentPageError
-    ? activeTab === "Settings"
-      ? "Settings error"
-      : "Chat error"
+    ? !showFullUi || activeTab === "Chat"
+      ? "Chat error"
+      : "Settings error"
     : useByokMode
       ? "BYOK"
       : useDemoData
         ? "Demo"
         : "Live";
+  const userDisplayName = "Account";
+  const userInitial = userDisplayName.trim().charAt(0).toUpperCase() || "A";
 
   async function handleSaveOpenrouterKey() {
     setSavingProviderConfig(true);
@@ -951,6 +964,37 @@ export default function App() {
     window.location.assign(getOAuthStartUrl(provider));
   }
 
+  function handleOpenLogin() {
+    if (typeof document === "undefined") return;
+    document.getElementById("login-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function handleRequireLoginForModelSelection() {
+    setAuthError("Log in to use a specific model. Auto mode is available without login.");
+    handleOpenLogin();
+  }
+
+  function handleModelSelectionChange(nextModel) {
+    if (!isAuthenticated || nextModel === "auto") {
+      return true;
+    }
+
+    const resolvedModel = resolveModelAlias(nextModel);
+    const requiredProvider = inferProviderFromModel(resolvedModel);
+    const isProviderConfigured = requiredProvider ? Boolean(effectiveProviderConfig?.providers?.[requiredProvider]?.configured) : true;
+
+    if (!isProviderConfigured) {
+      setSettingsError(
+        `Configure ${requiredProvider === "openrouter" ? "OpenRouter" : "OpenAI"} API key in Settings before using ${nextModel}.`,
+      );
+      setActiveTab("Settings");
+      window.location.hash = "Settings";
+      return false;
+    }
+
+    return true;
+  }
+
   async function handleLogout() {
     try {
       await logout({ useDemo: false });
@@ -984,137 +1028,197 @@ export default function App() {
     }
   }
 
-  let page = null;
-  if (!currentUser && !useDemoData && !useByokMode) {
-    page = (
-      <LoginPage
-        onSignup={handleSignup}
-        onLogin={handleLogin}
-        onOAuth={handleOAuth}
-        pending={authPending}
-        error={authError}
-        oauthReady={{
-          google: Boolean(health?.google_oauth_configured),
-          github: Boolean(health?.github_oauth_configured),
-        }}
-      />
-    );
-  } else if (activeTab === "Chat") {
-    page = (
-      <ChatPage
-        messages={messages}
-        pending={pendingChat}
-        onSend={handleSend}
-        selectedInsightId={selectedInsightId}
-        onSelectInsight={(value) => setSelectedInsightIds((current) => ({ ...current, [activeModeKey]: value }))}
-        selectedInsight={selectedInsight}
-        modeLabel={useByokMode ? "BYOK" : useDemoData ? "Demo" : "Proxy"}
-        chatMode={runtimeChatMode}
-        onChatModeChange={setChatMode}
-        sessionId={cloudSessionId}
-        modeLocked={accountBillingMode}
-      />
-    );
-  } else if (activeTab === "Dashboard") {
-    page = (
-      <Dashboard
-        stats={stats}
-        showProviderConfig={false}
-        providerConfig={effectiveProviderConfig}
-        openrouterDraft={openrouterDraft}
-        onOpenrouterDraftChange={setOpenrouterDraft}
-        onSaveOpenrouterKey={handleSaveOpenrouterKey}
-        onClearOpenrouterKey={handleClearOpenrouterKey}
-        savingProviderConfig={savingProviderConfig}
-      />
-    );
-  } else if (activeTab === "Scoring") {
-    page = <Scoring stats={stats} />;
-  } else if (activeTab === "Settings") {
-    page = (
-      <Settings
-        user={currentUser}
-        account={account}
-        health={health}
-        providerConfig={effectiveProviderConfig}
-        openrouterDraft={openrouterDraft}
-        onOpenrouterDraftChange={setOpenrouterDraft}
-        onSaveOpenrouterKey={handleSaveOpenrouterKey}
-        onClearOpenrouterKey={handleClearOpenrouterKey}
-        savingProviderConfig={savingProviderConfig}
-        onCheckout={handleCheckout}
-        billingPending={billingPending}
-      />
-    );
-  } else {
-    page = <Logs logs={logs} loading={loading} />;
+  const chatView = (
+    <ChatPage
+      messages={messages}
+      pending={pendingChat}
+      onSend={handleSend}
+      requireLoginForManualModels={!isAuthenticated}
+      onRequireLogin={handleRequireLoginForModelSelection}
+      onModelSelectionChange={handleModelSelectionChange}
+      selectedInsightId={selectedInsightId}
+      onSelectInsight={(value) => setSelectedInsightIds((current) => ({ ...current, [activeModeKey]: value }))}
+      selectedInsight={selectedInsight}
+      modeLabel={useByokMode ? "BYOK" : useDemoData ? "Demo" : "Proxy"}
+      chatMode={runtimeChatMode}
+      onChatModeChange={setChatMode}
+      sessionId={cloudSessionId}
+      modeLocked={accountBillingMode}
+    />
+  );
+
+  let utilityPanel = null;
+  const navigateTo = (tab) => {
+    setActiveTab(tab);
+    window.location.hash = tab;
+  };
+
+  if (showFullUi && activeTab !== "Chat") {
+    if (activeTab === "Dashboard") {
+      utilityPanel = (
+        <Dashboard
+          stats={stats}
+          showProviderConfig={false}
+          providerConfig={effectiveProviderConfig}
+          openrouterDraft={openrouterDraft}
+          onOpenrouterDraftChange={setOpenrouterDraft}
+          onSaveOpenrouterKey={handleSaveOpenrouterKey}
+          onClearOpenrouterKey={handleClearOpenrouterKey}
+          savingProviderConfig={savingProviderConfig}
+        />
+      );
+    } else if (activeTab === "Logs") {
+      utilityPanel = <Logs logs={logs} loading={loading} compact />;
+    } else if (activeTab === "Settings") {
+      utilityPanel = (
+        <Settings
+          user={currentUser}
+          account={account}
+          health={health}
+          providerConfig={effectiveProviderConfig}
+          openrouterDraft={openrouterDraft}
+          onOpenrouterDraftChange={setOpenrouterDraft}
+          onSaveOpenrouterKey={handleSaveOpenrouterKey}
+          onClearOpenrouterKey={handleClearOpenrouterKey}
+          savingProviderConfig={savingProviderConfig}
+          onCheckout={handleCheckout}
+          billingPending={billingPending}
+        />
+      );
+    }
   }
 
   return (
     <div className="app-shell">
-      <header className="topbar panel">
-        <div className="brand-block">
-          <div className="brand-lockup">
-            <img className="brand-lockup__icon" src={iconSrc} alt="" aria-hidden="true" />
-            <div className="brand-lockup__text">
-              <strong>ClawHelm</strong>
-              <span>Adaptive LLM routing dashboard</span>
-            </div>
+      <header className="chat-app-header">
+        <div className="chat-app-header__brand">
+          <img className="brand-lockup__icon" src={iconSrc} alt="" aria-hidden="true" />
+          <div className="chat-app-header__brand-copy">
+            <strong>ClawHelm</strong>
+            <span>Search across AI models</span>
           </div>
         </div>
-        <div className="topbar__status">
-          {currentUser && !useDemoData && !useByokMode ? (
-            <div className="topbar__identity">
-              <span>{currentUser.email}</span>
-              <button type="button" onClick={handleLogout}>
-                Sign out
+        <div className="chat-app-header__actions">
+          {!showFullUi ? (
+            <button
+              type="button"
+              className="ghost-button chat-app-header__login"
+              onClick={handleOpenLogin}
+            >
+              Log in
+            </button>
+          ) : null}
+          {showFullUi && currentUser ? (
+            <div className={`account-menu ${accountMenuOpen ? "account-menu--open" : ""}`}>
+              <button
+                type="button"
+                className="account-menu__trigger"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setAccountMenuOpen((value) => !value);
+                }}
+                aria-expanded={accountMenuOpen}
+              >
+                <span className="account-menu__avatar" aria-hidden="true">
+                  {userInitial}
+                </span>
+                <span className="account-menu__name">{userDisplayName}</span>
               </button>
+              {accountMenuOpen ? (
+                <div
+                  className="account-menu__panel"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="account-menu__identity">
+                    <span>Signed in</span>
+                    <strong>{currentUser.plan || "free"} plan</strong>
+                  </div>
+                  <div className="account-menu__nav" role="menu" aria-label="Navigation">
+                    {MENU_ITEMS.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`ghost-button account-menu__item ${activeTab === item.tab ? "account-menu__item--active" : ""}`}
+                        onClick={() => {
+                          navigateTo(item.tab);
+                          setAccountMenuOpen(false);
+                        }}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost-button account-menu__item account-menu__logout"
+                    onClick={async () => {
+                      setAccountMenuOpen(false);
+                      await handleLogout();
+                    }}
+                  >
+                    Log out
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
           <span className={`status-pill ${currentStatusClass}`}>{currentStatusLabel}</span>
         </div>
       </header>
 
-      {currentUser || useDemoData || useByokMode ? (
-        <nav className="tabs" aria-label="Primary">
-          <div className="tabs__rail">
-            {TABS.map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                className={`tab-button ${activeTab === tab ? "tab-button--active" : ""}`}
-                onClick={() => {
-                  setActiveTab(tab);
-                  window.location.hash = tab;
-                }}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-        </nav>
-      ) : null}
-
-      {DEMO_MODE ? (
-        <PublicAccessPanel
-          publicMode={publicMode}
-          onPublicModeChange={setPublicMode}
-          byokConfig={byokConfig}
-          onByokConfigChange={(next) => setByokConfig((current) => ({ ...current, ...next }))}
-        />
-      ) : null}
-
       {currentPageError ? <div className="error-banner">{currentPageError}</div> : null}
-      {!currentPageError && useDemoData ? (
-        <div className="warning-banner">
-          Public demo mode. This site uses bundled sample data and does not expose private logs or live backend traffic.
-        </div>
-      ) : null}
-      {!currentPageError && systemWarning && activeTab !== "Chat" && activeTab !== "Settings" ? (
+      {!currentPageError && systemWarning && showFullUi && activeTab !== "Chat" && activeTab !== "Settings" ? (
         <div className="warning-banner">{systemWarning}</div>
       ) : null}
 
-      {page}
+      <div
+        className={`workspace-shell ${utilityPanel ? "workspace-shell--with-panel" : ""}`}
+        style={utilityPanel ? { "--panel-width": `${panelWidth}px` } : undefined}
+      >
+        <div className="workspace-shell__chat">{chatView}</div>
+        {utilityPanel ? (
+          <button
+            type="button"
+            className="workspace-shell__resizer"
+            aria-label="Resize side panel"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              isResizingPanelRef.current = true;
+              document.body.style.userSelect = "none";
+              document.body.style.cursor = "col-resize";
+            }}
+          />
+        ) : null}
+        {utilityPanel ? (
+          <aside className="workspace-shell__panel">
+            <div className="workspace-panel__header">
+              <h2>{activeTab}</h2>
+              <button
+                type="button"
+                className="ghost-button workspace-panel__close"
+                onClick={() => navigateTo("Chat")}
+              >
+                Close
+              </button>
+            </div>
+            <div className="workspace-panel__body workspace-panel__body--compact">{utilityPanel}</div>
+          </aside>
+        ) : null}
+      </div>
+
+      {!showFullUi ? (
+        <LoginPage
+          onSignup={handleSignup}
+          onLogin={handleLogin}
+          onOAuth={handleOAuth}
+          pending={authPending}
+          error={authError}
+          oauthReady={{
+            google: Boolean(health?.google_oauth_configured),
+            github: Boolean(health?.github_oauth_configured),
+          }}
+        />
+      ) : null}
     </div>
   );
 }

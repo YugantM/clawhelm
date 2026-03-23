@@ -21,7 +21,7 @@ export default function LoginPage({ onSignup, onLogin, onOAuth, pending, error, 
   }
 
   return (
-    <section className="login-shell panel">
+    <section className="login-shell panel" id="login-panel">
       <div className="login-shell__hero">
         <span className="login-shell__eyebrow">Account Access</span>
         <h1>Sign up for ClawHelm Cloud</h1>

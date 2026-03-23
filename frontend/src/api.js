@@ -3,6 +3,19 @@ import { buildDemoChatResponse, demoLogs, demoStats, DEMO_MODE } from "./demoDat
 const API_BASE_URL = import.meta.env.DEV ? "" : (import.meta.env.VITE_API_BASE_URL || "");
 const OPENAI_BASE_URL = "https://api.openai.com";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const MODEL_ALIAS_TO_ID = {
+  auto: "clawhelm-auto",
+  deepseek: "deepseek/deepseek-chat:free",
+  mistral: "mistralai/mistral-7b-instruct:free",
+  openchat: "openchat/openchat-7b:free",
+};
+
+export function resolveModelAlias(modelAlias = "auto") {
+  if (modelAlias === "auto") {
+    return MODEL_ALIAS_TO_ID.auto;
+  }
+  return MODEL_ALIAS_TO_ID[modelAlias] || modelAlias;
+}
 
 function getDemoPayload(path, options) {
   if (path === "/logs") return demoLogs;
@@ -41,6 +54,14 @@ function getDemoPayload(path, options) {
     const parsed = options?.body ? JSON.parse(options.body) : { messages: [] };
     return buildDemoChatResponse(parsed.messages || []);
   }
+  if (path === "/chat/models") {
+    return [
+      { id: "auto", label: "Auto", model_id: null, endpoint: "/chat", is_free: false, recommended: true },
+      { id: "deepseek", label: "DeepSeek", model_id: "deepseek/deepseek-chat:free", endpoint: "/chat", is_free: true, recommended: false },
+      { id: "mistral", label: "Mistral", model_id: "mistralai/mistral-7b-instruct:free", endpoint: "/chat", is_free: true, recommended: false },
+      { id: "openchat", label: "OpenChat", model_id: "openchat/openchat-7b:free", endpoint: "/chat", is_free: true, recommended: false },
+    ];
+  }
   return null;
 }
 
@@ -69,6 +90,13 @@ async function fetchJson(path, options, { useDemo = DEMO_MODE } = {}) {
   }
 
   return payload;
+}
+
+function resolveRequestTarget(pathOrUrl) {
+  if (/^https?:\/\//i.test(pathOrUrl)) {
+    return pathOrUrl;
+  }
+  return `${API_BASE_URL}${pathOrUrl}`;
 }
 
 export function getLogs(options) {
@@ -176,7 +204,8 @@ export function updateOpenRouterApiKey(apiKey, options) {
   );
 }
 
-export function postChat(messages, options) {
+export function postChat(messages, requestOptions, options) {
+  const modelAlias = requestOptions?.model || "auto";
   return fetchJson(
     "/v1/chat/completions",
     {
@@ -186,7 +215,7 @@ export function postChat(messages, options) {
         "X-ClawHelm-Client": "dashboard",
       },
       body: JSON.stringify({
-        model: "clawhelm-auto",
+        model: resolveModelAlias(modelAlias),
         messages,
       }),
     },
@@ -194,7 +223,7 @@ export function postChat(messages, options) {
   );
 }
 
-export function postCloudChat({ message, sessionId }, options) {
+export function postCloudChat({ message, sessionId, model = "auto" }, options) {
   return fetchJson(
     "/chat",
     {
@@ -206,11 +235,16 @@ export function postCloudChat({ message, sessionId }, options) {
       },
       body: JSON.stringify({
         message,
+        model: model === "clawhelm-auto" ? "auto" : model,
         session_id: sessionId,
       }),
     },
     options,
   );
+}
+
+export function getChatModels(options) {
+  return fetchJson("/chat/models", undefined, options);
 }
 
 export async function postChatByok({

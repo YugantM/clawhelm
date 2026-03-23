@@ -71,6 +71,15 @@ class ChatRequest(BaseModel):
     user_id: str | None = None
 
 
+class ChatModelOption(BaseModel):
+    id: str
+    label: str
+    model_id: str | None = None
+    endpoint: str
+    is_free: bool
+    recommended: bool = False
+
+
 class CheckoutSessionRequest(BaseModel):
     user_id: str | None = None
 
