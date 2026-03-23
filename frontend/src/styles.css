@@ -63,6 +63,50 @@ select {
   padding: 28px 32px 30px;
 }
 
+.topbar__status {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.topbar__identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(8, 12, 24, 0.62);
+}
+
+.topbar__identity span {
+  color: #cbd5e1;
+  font-size: 0.88rem;
+}
+
+.topbar__identity button,
+.billing-card__actions button,
+.login-form button {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #22d3ee, #f97316);
+  color: #020617;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.topbar__identity button {
+  padding: 8px 12px;
+}
+
+.topbar__identity button:disabled,
+.billing-card__actions button:disabled,
+.login-form button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .brand-block {
   display: grid;
   gap: 0;
@@ -219,6 +263,97 @@ select {
 
 .provider-config {
   padding: 20px 22px;
+}
+
+.login-shell {
+  width: min(720px, 100%);
+  margin: 48px auto 0;
+  padding: 28px 30px;
+  display: grid;
+  gap: 24px;
+}
+
+.login-shell__hero {
+  display: grid;
+  gap: 10px;
+}
+
+.login-shell__eyebrow {
+  color: #7dd3fc;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.78rem;
+}
+
+.login-shell h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+  letter-spacing: -0.05em;
+}
+
+.login-shell p {
+  margin: 0;
+  color: #91a4c6;
+  line-height: 1.6;
+}
+
+.login-form {
+  display: grid;
+  gap: 16px;
+}
+
+.login-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.login-form span {
+  color: #a9bad5;
+  font-size: 0.84rem;
+}
+
+.login-form input {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: rgba(12, 17, 31, 0.88);
+  color: #e5eefb;
+}
+
+.login-divider {
+  position: relative;
+  text-align: center;
+  color: #8fa2c4;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.login-divider::before {
+  content: "";
+  position: absolute;
+  inset: 50% 0 auto;
+  height: 1px;
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.login-divider span {
+  position: relative;
+  display: inline-block;
+  padding: 0 10px;
+  background: rgba(10, 14, 26, 0.9);
+}
+
+.login-oauth-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.login-shell__hint {
+  margin: 0;
+  color: #91a4c6;
 }
 
 .provider-config__header {
@@ -666,6 +801,16 @@ select {
   color: #91a4c6;
 }
 
+.billing-card__actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.billing-card__actions p {
+  margin: 0;
+}
+
 .settings-list {
   display: grid;
   gap: 10px;
@@ -983,6 +1128,12 @@ select {
 
   .topbar {
     flex-direction: column;
+  }
+
+  .topbar__status,
+  .topbar__identity {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .access-panel__header {

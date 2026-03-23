@@ -49,7 +49,10 @@ async function fetchJson(path, options, { useDemo = DEMO_MODE } = {}) {
     return getDemoPayload(path, options);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, options);
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: "include",
+    ...options,
+  });
   const text = await response.text();
   let payload;
   try {
@@ -82,6 +85,78 @@ export function getHealth(options) {
 
 export function getProviderConfig(options) {
   return fetchJson("/config/providers", undefined, options);
+}
+
+export function getUserAccount(userId, options) {
+  return fetchJson(`/user/${encodeURIComponent(userId)}`, undefined, options);
+}
+
+export function getAuthMe(options) {
+  return fetchJson("/auth/me", undefined, options);
+}
+
+export function signup(payload, options) {
+  return fetchJson(
+    "/auth/signup",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-ClawHelm-Client": "dashboard",
+      },
+      body: JSON.stringify(payload),
+    },
+    options,
+  );
+}
+
+export function login(payload, options) {
+  return fetchJson(
+    "/auth/login",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-ClawHelm-Client": "dashboard",
+      },
+      body: JSON.stringify(payload),
+    },
+    options,
+  );
+}
+
+export function logout(options) {
+  return fetchJson(
+    "/auth/logout",
+    {
+      method: "POST",
+      headers: {
+        "X-ClawHelm-Client": "dashboard",
+      },
+    },
+    options,
+  );
+}
+
+export function getOAuthStartUrl(provider) {
+  return `${API_BASE_URL}/auth/oauth/${provider}/start`;
+}
+
+export function createCheckoutSession(userId, options) {
+  return fetchJson(
+    "/create-checkout-session",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-ClawHelm-Client": "dashboard",
+      },
+      body: JSON.stringify({
+        user_id: userId,
+      }),
+    },
+    options,
+  );
 }
 
 export function updateOpenRouterApiKey(apiKey, options) {

@@ -1,0 +1,12 @@
+[phases.setup]
+nixPkgs = ["python313", "nodejs_22"]
+
+[phases.install]
+cmds = [
+  "python -m venv /opt/venv",
+  ". /opt/venv/bin/activate && pip install --upgrade pip",
+  ". /opt/venv/bin/activate && pip install -r requirements.txt"
+]
+
+[start]
+cmd = ". /opt/venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"

@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException, Request, Response
 from starlette.background import BackgroundTask
+from starlette.datastructures import MutableHeaders
 from starlette.responses import StreamingResponse
 
 from ..cloud.memory import memory_store
@@ -129,6 +130,49 @@ def filter_response_headers(headers: httpx.Headers) -> dict[str, str]:
     return {key: value for key, value in headers.items() if key.lower() not in HOP_BY_HOP_HEADERS}
 
 
+def add_usage_headers(
+    headers: MutableHeaders,
+    user_id: str | None,
+    usage_summary: Mapping[str, Any] | None,
+    plan: str | None,
+) -> None:
+    if user_id:
+        headers["X-User-Id"] = user_id
+    if plan:
+        headers["X-User-Plan"] = plan
+    if not usage_summary:
+        return
+    headers["X-Usage-Requests-Today"] = str(usage_summary.get("requests_today", 0))
+    headers["X-Usage-Limit"] = str(usage_summary.get("limit", 0))
+    remaining = usage_summary.get("remaining")
+    if remaining is None:
+        headers["X-Usage-Remaining"] = "unlimited"
+    else:
+        headers["X-Usage-Remaining"] = str(remaining)
+
+
+def add_usage_payload(payload: Any, user_id: str | None, usage_summary: Mapping[str, Any] | None, plan: str | None) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    response_payload = dict(payload)
+    if user_id:
+        response_payload["user_id"] = user_id
+    if plan:
+        response_payload["plan"] = plan
+
+    merged_usage: dict[str, Any] = {}
+    existing_usage = response_payload.get("usage")
+    if isinstance(existing_usage, Mapping):
+        merged_usage.update(existing_usage)
+    if usage_summary:
+        merged_usage.update(usage_summary)
+    if merged_usage:
+        response_payload["usage"] = merged_usage
+
+    return response_payload
+
+
 def detect_request_source(request: Request, original_model: str | None) -> str:
     explicit_source = request.headers.get("x-clawhelm-client", "").strip().lower()
     if explicit_source in {"dashboard", "openclaw", "external"}:
@@ -204,6 +248,10 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
         prompt = truncate_text(request_body.decode("utf-8", errors="replace"))
 
     request_source = detect_request_source(request, original_model)
+    user_id = getattr(request.state, "user_id", None)
+    request_count = getattr(request.state, "request_count", None)
+    usage_summary = getattr(request.state, "usage_summary", None)
+    plan = getattr(request.state, "plan", None)
     started_at = time.perf_counter()
     response_text_for_log: str | None = None
     total_tokens: int | None = None
@@ -221,6 +269,8 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
     ) -> None:
         selected_model = decision.model if decision else original_model
         await db.insert_log(
+            user_id=user_id,
+            request_count=request_count,
             session_id=session_id,
             request_source=request_source,
             original_model=original_model,
@@ -309,13 +359,16 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
                     actual_model=actual_model_for_log,
                 )
 
-            return StreamingResponse(
+            stream_response = StreamingResponse(
                 stream_and_capture(),
                 status_code=provider_response.status_code,
                 headers=filter_response_headers(provider_response.headers),
                 media_type=provider_response.headers.get("content-type"),
                 background=BackgroundTask(finalize_stream_log),
             )
+            if 200 <= provider_response.status_code < 400:
+                add_usage_headers(stream_response.headers, user_id, usage_summary, plan)
+            return stream_response
 
         response_payload: Any = None
         try:
@@ -346,12 +399,29 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
             if response_text_for_log:
                 await memory_store.store_messages(session_id, [{"role": "assistant", "content": response_text_for_log}])
 
-        return Response(
+        response_headers = filter_response_headers(provider_response.headers)
+        if 200 <= provider_response.status_code < 400:
+            enriched_payload = add_usage_payload(response_payload, user_id, usage_summary, plan)
+            if enriched_payload is not response_payload:
+                response_headers["content-type"] = "application/json"
+                response = Response(
+                    content=json.dumps(enriched_payload, ensure_ascii=True).encode("utf-8"),
+                    status_code=provider_response.status_code,
+                    headers=response_headers,
+                    media_type="application/json",
+                )
+                add_usage_headers(response.headers, user_id, usage_summary, plan)
+                return response
+
+        response = Response(
             content=provider_response.content,
             status_code=provider_response.status_code,
-            headers=filter_response_headers(provider_response.headers),
+            headers=response_headers,
             media_type=provider_response.headers.get("content-type"),
         )
+        if 200 <= provider_response.status_code < 400:
+            add_usage_headers(response.headers, user_id, usage_summary, plan)
+        return response
     except HTTPException as exc:
         latency = time.perf_counter() - started_at
         await log_request(

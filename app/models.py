@@ -9,6 +9,8 @@ from pydantic import BaseModel
 class LogEntry(BaseModel):
     id: int
     timestamp: datetime
+    user_id: str | None
+    request_count: int | None
     session_id: str | None
     request_source: str | None
     original_model: str | None
@@ -66,6 +68,39 @@ class ChatRequest(BaseModel):
     message: str | None = None
     messages: list[dict[str, Any]] | None = None
     session_id: str | None = None
+    user_id: str | None = None
+
+
+class CheckoutSessionRequest(BaseModel):
+    user_id: str | None = None
+
+
+class UserAccountResponse(BaseModel):
+    user_id: str
+    plan: str
+    is_superuser: bool = False
+    requests_today: int
+    limit: int
+    remaining: int | None
+    last_updated: str
+
+
+class AuthFormRequest(BaseModel):
+    email: str
+    password: str
+    name: str | None = None
+
+
+class AuthUserResponse(BaseModel):
+    user_id: str
+    email: str
+    name: str
+    plan: str
+    is_superuser: bool = False
+    requests_today: int
+    limit: int
+    remaining: int | None
+    last_updated: str
 
 
 class SessionResponse(BaseModel):

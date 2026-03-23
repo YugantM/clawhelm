@@ -128,6 +128,105 @@ At a high level:
 5. Clawhelm logs the route, actual answering model, latency, cost, and fallback behavior
 6. The frontend dashboard exposes that data in real time
 
+## Stripe Setup
+
+ClawHelm includes a minimal payment unlock flow for the SaaS layer:
+
+- `POST /create-checkout-session`
+- `POST /webhook`
+- `/chat` returns `plan` as `free` or `pro`
+
+Required environment variables:
+
+- `STRIPE_SECRET_KEY`
+- `STRIPE_PRICE_ID`
+- `STRIPE_WEBHOOK_SECRET`
+- `FRONTEND_BASE_URL`
+
+Optional overrides:
+
+- `STRIPE_SUCCESS_URL`
+- `STRIPE_CANCEL_URL`
+
+Local setup:
+
+1. Copy `.env.example` to `.env` if needed.
+2. Set `ENV_MODE=cloud`.
+3. Keep `ENABLE_CLOUD_MODE=true`.
+4. Add your Stripe test secret key, Stripe price id, and webhook secret.
+5. Start the backend.
+6. In another terminal, forward Stripe events to the backend:
+
+```bash
+stripe listen --forward-to http://127.0.0.1:8000/webhook
+```
+
+7. Copy the signing secret shown by Stripe CLI into `STRIPE_WEBHOOK_SECRET`.
+
+Verify backend config:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+The response now includes:
+
+- `stripe_secret_key_configured`
+- `stripe_price_id_configured`
+- `stripe_webhook_secret_configured`
+- `frontend_base_url`
+
+Create a Stripe checkout session:
+
+```bash
+curl http://127.0.0.1:8000/create-checkout-session \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user_123"
+  }'
+```
+
+Expected response:
+
+```json
+{
+  "user_id": "user_123",
+  "url": "https://checkout.stripe.com/..."
+}
+```
+
+Webhook behavior:
+
+- ClawHelm verifies the `Stripe-Signature` header
+- only `checkout.session.completed` upgrades a user
+- the backend reads `metadata.user_id` from the Stripe Checkout Session
+
+Railway setup:
+
+Set these variables on the Railway backend service:
+
+- `ENV_MODE=cloud`
+- `ENABLE_CLOUD_MODE=true`
+- `ENABLE_MEMORY=true`
+- `ENABLE_STYLE_LAYER=true`
+- `ENABLE_PREMIUM_ROUTING=true`
+- `FRONTEND_BASE_URL=https://your-frontend-domain`
+- `STRIPE_SECRET_KEY=...`
+- `STRIPE_PRICE_ID=...`
+- `STRIPE_WEBHOOK_SECRET=...`
+
+Then create a Stripe webhook endpoint targeting:
+
+```text
+https://your-railway-backend-domain/webhook
+```
+
+Important:
+
+- GitHub Pages only hosts the static frontend
+- Stripe checkout session creation and webhook verification must run on the FastAPI backend
+- in production, the frontend should call the Railway backend URL
+
 ## Core Capabilities
 
 ### 1. OpenAI-Compatible Proxy

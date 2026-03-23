@@ -35,6 +35,8 @@ class Database:
                 CREATE TABLE IF NOT EXISTS logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
+                    user_id TEXT,
+                    request_count INTEGER,
                     session_id TEXT,
                     request_source TEXT,
                     original_model TEXT,
@@ -56,36 +58,88 @@ class Database:
                 )
                 """
             )
-            self._ensure_column(connection, "original_model", "TEXT")
-            self._ensure_column(connection, "session_id", "TEXT")
-            self._ensure_column(connection, "request_source", "TEXT")
-            self._ensure_column(connection, "selected_model", "TEXT")
-            self._ensure_column(connection, "actual_model", "TEXT")
-            self._ensure_column(connection, "model_display_name", "TEXT")
-            self._ensure_column(connection, "provider", "TEXT")
-            self._ensure_column(connection, "is_free_model", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(connection, "model_source", "TEXT")
-            self._ensure_column(connection, "routing_reason", "TEXT")
-            self._ensure_column(connection, "routing_score", "REAL")
-            self._ensure_column(connection, "status_code", "INTEGER")
-            self._ensure_column(connection, "fallback_used", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(connection, "estimated_cost", "REAL NOT NULL DEFAULT 0")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    password_hash TEXT,
+                    plan TEXT NOT NULL DEFAULT 'free',
+                    is_superuser INTEGER NOT NULL DEFAULT 0,
+                    requests_today INTEGER NOT NULL DEFAULT 0,
+                    last_updated TEXT NOT NULL,
+                    stripe_customer_id TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS oauth_accounts (
+                    provider TEXT NOT NULL,
+                    provider_user_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (provider, provider_user_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sessions (
+                    token_hash TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS oauth_states (
+                    state TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL,
+                    redirect_path TEXT,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            self._ensure_column(connection, "logs", "original_model", "TEXT")
+            self._ensure_column(connection, "logs", "user_id", "TEXT")
+            self._ensure_column(connection, "logs", "request_count", "INTEGER")
+            self._ensure_column(connection, "logs", "session_id", "TEXT")
+            self._ensure_column(connection, "logs", "request_source", "TEXT")
+            self._ensure_column(connection, "logs", "selected_model", "TEXT")
+            self._ensure_column(connection, "logs", "actual_model", "TEXT")
+            self._ensure_column(connection, "logs", "model_display_name", "TEXT")
+            self._ensure_column(connection, "logs", "provider", "TEXT")
+            self._ensure_column(connection, "logs", "is_free_model", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "logs", "model_source", "TEXT")
+            self._ensure_column(connection, "logs", "routing_reason", "TEXT")
+            self._ensure_column(connection, "logs", "routing_score", "REAL")
+            self._ensure_column(connection, "logs", "status_code", "INTEGER")
+            self._ensure_column(connection, "logs", "fallback_used", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "logs", "estimated_cost", "REAL NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "users", "is_superuser", "INTEGER NOT NULL DEFAULT 0")
             self._rename_legacy_model_column(connection)
             connection.commit()
 
     @staticmethod
     def _ensure_column(
         connection: sqlite3.Connection,
+        table_name: str,
         column_name: str,
         column_type: str,
     ) -> None:
         existing_columns = {
             row["name"]
-            for row in connection.execute("PRAGMA table_info(logs)").fetchall()
+            for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
         }
         if column_name not in existing_columns:
             connection.execute(
-                f"ALTER TABLE logs ADD COLUMN {column_name} {column_type}"
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
             )
 
     @staticmethod
@@ -115,6 +169,8 @@ class Database:
     async def insert_log(
         self,
         *,
+        user_id: str | None,
+        request_count: int | None,
         session_id: str | None,
         request_source: str | None,
         original_model: str | None,
@@ -136,6 +192,8 @@ class Database:
     ) -> None:
         await asyncio.to_thread(
             self._insert_log_sync,
+            user_id,
+            request_count,
             session_id,
             request_source,
             original_model,
@@ -158,6 +216,8 @@ class Database:
 
     def _insert_log_sync(
         self,
+        user_id: str | None,
+        request_count: int | None,
         session_id: str | None,
         request_source: str | None,
         original_model: str | None,
@@ -182,6 +242,8 @@ class Database:
                 """
                 INSERT INTO logs (
                     timestamp,
+                    user_id,
+                    request_count,
                     session_id,
                     request_source,
                     original_model,
@@ -201,10 +263,12 @@ class Database:
                     total_tokens,
                     estimated_cost
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     datetime.now(timezone.utc).isoformat(),
+                    user_id,
+                    request_count,
                     session_id,
                     request_source,
                     original_model,
@@ -231,6 +295,292 @@ class Database:
         rows = await asyncio.to_thread(self._get_recent_logs_sync, limit)
         return [self._row_to_log_entry(row) for row in rows]
 
+    async def create_user(
+        self,
+        *,
+        user_id: str,
+        email: str,
+        name: str,
+        password_hash: str | None,
+        plan: str = "free",
+        is_superuser: bool = False,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self._create_user_sync, user_id, email, name, password_hash, plan, is_superuser)
+
+    def _create_user_sync(
+        self,
+        user_id: str,
+        email: str,
+        name: str,
+        password_hash: str | None,
+        plan: str,
+        is_superuser: bool,
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO users (id, email, name, password_hash, plan, is_superuser, requests_today, last_updated, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+                """,
+                (user_id, email.lower(), name, password_hash, plan, int(is_superuser), now, now),
+            )
+            connection.commit()
+            row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else {}
+
+    async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._get_user_by_email_sync, email)
+
+    def _get_user_by_email_sync(self, email: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM users WHERE email = ?", (email.lower(),)).fetchone()
+        return dict(row) if row else None
+
+    async def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._get_user_by_id_sync, user_id)
+
+    def _get_user_by_id_sync(self, user_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+    async def get_or_create_oauth_user(
+        self,
+        *,
+        provider: str,
+        provider_user_id: str,
+        email: str,
+        name: str,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self._get_or_create_oauth_user_sync, provider, provider_user_id, email.lower(), name)
+
+    def _get_or_create_oauth_user_sync(
+        self,
+        provider: str,
+        provider_user_id: str,
+        email: str,
+        name: str,
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            linked = connection.execute(
+                """
+                SELECT u.*
+                FROM oauth_accounts oa
+                JOIN users u ON u.id = oa.user_id
+                WHERE oa.provider = ? AND oa.provider_user_id = ?
+                """,
+                (provider, provider_user_id),
+            ).fetchone()
+            if linked:
+                return dict(linked)
+
+            existing_user = connection.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+            if existing_user:
+                user_id = existing_user["id"]
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO oauth_accounts (provider, provider_user_id, user_id, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (provider, provider_user_id, user_id, now),
+                )
+                connection.commit()
+                return dict(existing_user)
+
+            user_id = f"user_{os.urandom(8).hex()}"
+            connection.execute(
+                """
+                INSERT INTO users (id, email, name, password_hash, plan, is_superuser, requests_today, last_updated, created_at)
+                VALUES (?, ?, ?, NULL, 'free', 0, 0, ?, ?)
+                """,
+                (user_id, email, name, now, now),
+            )
+            connection.execute(
+                """
+                INSERT INTO oauth_accounts (provider, provider_user_id, user_id, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (provider, provider_user_id, user_id, now),
+            )
+            connection.commit()
+            row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else {}
+
+    async def create_session(self, *, token_hash: str, user_id: str, expires_at: str) -> None:
+        await asyncio.to_thread(self._create_session_sync, token_hash, user_id, expires_at)
+
+    def _create_session_sync(self, token_hash: str, user_id: str, expires_at: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
+            connection.execute(
+                """
+                INSERT INTO sessions (token_hash, user_id, expires_at, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (token_hash, user_id, expires_at, now),
+            )
+            connection.commit()
+
+    async def get_user_by_session_token_hash(self, token_hash: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._get_user_by_session_token_hash_sync, token_hash)
+
+    def _get_user_by_session_token_hash_sync(self, token_hash: str) -> dict[str, Any] | None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
+            row = connection.execute(
+                """
+                SELECT u.*
+                FROM sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.token_hash = ? AND s.expires_at > ?
+                """,
+                (token_hash, now),
+            ).fetchone()
+            connection.commit()
+        return dict(row) if row else None
+
+    async def delete_session(self, token_hash: str) -> None:
+        await asyncio.to_thread(self._delete_session_sync, token_hash)
+
+    def _delete_session_sync(self, token_hash: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+            connection.commit()
+
+    async def store_oauth_state(self, *, state: str, provider: str, redirect_path: str | None, expires_at: str) -> None:
+        await asyncio.to_thread(self._store_oauth_state_sync, state, provider, redirect_path, expires_at)
+
+    def _store_oauth_state_sync(self, state: str, provider: str, redirect_path: str | None, expires_at: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute("DELETE FROM oauth_states WHERE expires_at <= ?", (now,))
+            connection.execute(
+                """
+                INSERT INTO oauth_states (state, provider, redirect_path, expires_at, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (state, provider, redirect_path, expires_at, now),
+            )
+            connection.commit()
+
+    async def consume_oauth_state(self, *, state: str, provider: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._consume_oauth_state_sync, state, provider)
+
+    def _consume_oauth_state_sync(self, state: str, provider: str) -> dict[str, Any] | None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute("DELETE FROM oauth_states WHERE expires_at <= ?", (now,))
+            row = connection.execute(
+                """
+                SELECT * FROM oauth_states
+                WHERE state = ? AND provider = ? AND expires_at > ?
+                """,
+                (state, provider, now),
+            ).fetchone()
+            if row:
+                connection.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
+            connection.commit()
+        return dict(row) if row else None
+
+    async def consume_user_request(self, *, user_id: str, free_daily_limit: int) -> tuple[bool, dict[str, Any] | None]:
+        return await asyncio.to_thread(self._consume_user_request_sync, user_id, free_daily_limit)
+
+    def _consume_user_request_sync(self, user_id: str, free_daily_limit: int) -> tuple[bool, dict[str, Any] | None]:
+        today = datetime.now(timezone.utc).date().isoformat()
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            if row is None:
+                return False, None
+            user = dict(row)
+            requests_today = int(user["requests_today"] or 0)
+            if user["last_updated"][:10] != today:
+                requests_today = 0
+            if user["plan"] != "pro" and requests_today >= free_daily_limit:
+                updated = {
+                    **user,
+                    "requests_today": requests_today,
+                    "last_updated": today,
+                }
+                return False, updated
+
+            requests_today += 1
+            connection.execute(
+                """
+                UPDATE users
+                SET requests_today = ?, last_updated = ?
+                WHERE id = ?
+                """,
+                (requests_today, today, user_id),
+            )
+            connection.commit()
+            user["requests_today"] = requests_today
+            user["last_updated"] = today
+        return True, user
+
+    async def update_user_plan(self, *, user_id: str, plan: str, stripe_customer_id: str | None = None) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._update_user_plan_sync, user_id, plan, stripe_customer_id)
+
+    def _update_user_plan_sync(self, user_id: str, plan: str, stripe_customer_id: str | None) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE users
+                SET plan = ?, stripe_customer_id = COALESCE(?, stripe_customer_id)
+                WHERE id = ?
+                """,
+                (plan, stripe_customer_id, user_id),
+            )
+            connection.commit()
+            row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+    async def upsert_local_superuser(
+        self,
+        *,
+        email: str,
+        name: str,
+        password_hash: str,
+        plan: str = "pro",
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self._upsert_local_superuser_sync, email.lower(), name, password_hash, plan)
+
+    def _upsert_local_superuser_sync(
+        self,
+        email: str,
+        name: str,
+        password_hash: str,
+        plan: str,
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            existing = connection.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+            if existing:
+                connection.execute(
+                    """
+                    UPDATE users
+                    SET name = ?, password_hash = ?, plan = ?, is_superuser = 1, last_updated = ?
+                    WHERE email = ?
+                    """,
+                    (name, password_hash, plan, now, email),
+                )
+                user_id = existing["id"]
+            else:
+                user_id = f"user_{os.urandom(8).hex()}"
+                connection.execute(
+                    """
+                    INSERT INTO users (id, email, name, password_hash, plan, is_superuser, requests_today, last_updated, created_at)
+                    VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?)
+                    """,
+                    (user_id, email, name, password_hash, plan, now, now),
+                )
+            connection.commit()
+            row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else {}
+
     def _get_recent_logs_sync(self, limit: int) -> list[sqlite3.Row]:
         with self._connect() as connection:
             cursor = connection.execute(
@@ -238,6 +588,8 @@ class Database:
                 SELECT
                     id,
                     timestamp,
+                    user_id,
+                    request_count,
                     session_id,
                     request_source,
                     original_model,
@@ -335,6 +687,8 @@ class Database:
         return LogEntry(
             id=row["id"],
             timestamp=datetime.fromisoformat(row["timestamp"]),
+            user_id=row["user_id"],
+            request_count=row["request_count"],
             session_id=row["session_id"],
             request_source=row["request_source"],
             original_model=row["original_model"],

@@ -1,5 +1,48 @@
 import ProviderConfigPanel from "../components/ProviderConfigPanel";
 
+function BillingCard({ user, account, health, onCheckout, billingPending }) {
+  const isPro = account?.plan === "pro";
+  const stripeReady =
+    health?.stripe_secret_key_configured && health?.stripe_price_id_configured && health?.stripe_webhook_secret_configured;
+
+  return (
+    <section className="settings-card panel">
+      <h2>Billing</h2>
+      <div className="settings-list">
+        <div className="settings-list__row">
+          <span>User</span>
+          <strong>{user?.email || user?.name || "anonymous"}</strong>
+        </div>
+        <div className="settings-list__row">
+          <span>User ID</span>
+          <strong>{account?.user_id || user?.user_id || "pending"}</strong>
+        </div>
+        <div className="settings-list__row">
+          <span>Plan</span>
+          <strong>{account?.plan || "free"}</strong>
+        </div>
+        <div className="settings-list__row">
+          <span>Requests today</span>
+          <strong>
+            {account?.requests_today ?? 0}
+            {account?.remaining == null ? " · unlimited" : ` · ${account?.remaining ?? 0} left`}
+          </strong>
+        </div>
+        <div className="settings-list__row">
+          <span>Stripe backend</span>
+          <strong>{stripeReady ? "ready" : "missing config"}</strong>
+        </div>
+      </div>
+      <div className="billing-card__actions">
+        <button type="button" onClick={onCheckout} disabled={billingPending || isPro || !stripeReady}>
+          {isPro ? "Pro Active" : billingPending ? "Redirecting..." : "Upgrade with Stripe"}
+        </button>
+        {!stripeReady ? <p>Stripe is not fully configured on the Railway backend yet.</p> : null}
+      </div>
+    </section>
+  );
+}
+
 function RuntimeInfoCard({ health, providerConfig }) {
   const openrouter = providerConfig?.providers?.openrouter;
   const openai = providerConfig?.providers?.openai;
@@ -76,6 +119,8 @@ function FutureConfigCard() {
 }
 
 export default function Settings({
+  user,
+  account,
   health,
   providerConfig,
   openrouterDraft,
@@ -83,9 +128,12 @@ export default function Settings({
   onSaveOpenrouterKey,
   onClearOpenrouterKey,
   savingProviderConfig,
+  onCheckout,
+  billingPending,
 }) {
   return (
     <div className="page-stack">
+      <BillingCard user={user} account={account} health={health} onCheckout={onCheckout} billingPending={billingPending} />
       <ProviderConfigPanel
         providerConfig={providerConfig}
         openrouterDraft={openrouterDraft}

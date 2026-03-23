@@ -1,8 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
-import { getHealth, getLogs, getProviderConfig, getStats, postChat, postChatByok, postCloudChat, updateOpenRouterApiKey } from "./api";
+import {
+  createCheckoutSession,
+  getHealth,
+  getLogs,
+  getProviderConfig,
+  getStats,
+  getAuthMe,
+  getOAuthStartUrl,
+  postChat,
+  postChatByok,
+  postCloudChat,
+  login,
+  logout,
+  signup,
+  updateOpenRouterApiKey,
+} from "./api";
 import { DEMO_MODE } from "./demoData";
 import ChatPage from "./pages/ChatPage";
 import Dashboard from "./pages/Dashboard";
+import LoginPage from "./pages/LoginPage";
 import Logs from "./pages/Logs";
 import Scoring from "./pages/Scoring";
 import Settings from "./pages/Settings";
@@ -76,6 +92,16 @@ function getInitialCloudSessionId() {
   const sessionId = createSessionId();
   window.localStorage.setItem(STORAGE_KEYS.cloudSessionId, sessionId);
   return sessionId;
+}
+
+function getCheckoutNotice() {
+  if (typeof window === "undefined") return "";
+  const params = new URLSearchParams(window.location.search);
+  const checkout = params.get("checkout");
+  if (checkout === "success") return "Stripe checkout completed. Refreshing your plan now.";
+  if (checkout === "cancel") return "Stripe checkout was canceled.";
+  if (params.get("auth") === "error") return "Authentication failed. Try again.";
+  return "";
 }
 
 function normalizeAssistantContent(response, latestInsight) {
@@ -363,24 +389,38 @@ export default function App() {
   const [byokConfig, setByokConfig] = useState(getInitialByokConfig);
   const [chatMode, setChatMode] = useState(getInitialChatMode);
   const [cloudSessionId, setCloudSessionId] = useState(getInitialCloudSessionId);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [account, setAccount] = useState(null);
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState(null);
   const [health, setHealth] = useState(null);
   const [providerConfig, setProviderConfig] = useState(null);
   const [openrouterDraft, setOpenrouterDraft] = useState("");
-  const [messages, setMessages] = useState([]);
-  const [selectedInsightId, setSelectedInsightId] = useState(null);
+  const [localMessages, setLocalMessages] = useState([]);
+  const [cloudMessages, setCloudMessages] = useState([]);
+  const [selectedInsightIds, setSelectedInsightIds] = useState({ local: null, cloud: null });
   const [loading, setLoading] = useState(true);
   const [pendingChat, setPendingChat] = useState(false);
   const [chatError, setChatError] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [systemWarning, setSystemWarning] = useState("");
   const [savingProviderConfig, setSavingProviderConfig] = useState(false);
+  const [authPending, setAuthPending] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [billingPending, setBillingPending] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState(null);
   const [pendingAssistantId, setPendingAssistantId] = useState(null);
 
   const useDemoData = DEMO_MODE && publicMode === "demo";
   const useByokMode = DEMO_MODE && publicMode === "byok";
+  const accountBillingMode = Boolean(currentUser) && !useDemoData && !useByokMode;
+  const runtimeChatMode = accountBillingMode ? "cloud" : chatMode;
+  const activeModeKey = useDemoData || useByokMode ? "local" : runtimeChatMode;
+  const messages = activeModeKey === "cloud" ? cloudMessages : localMessages;
+  const setMessages = activeModeKey === "cloud" ? setCloudMessages : setLocalMessages;
+  const selectedInsightId = selectedInsightIds[activeModeKey];
+  const setSelectedInsightId = (value) =>
+    setSelectedInsightIds((current) => ({ ...current, [activeModeKey]: value }));
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -407,10 +447,18 @@ export default function App() {
 
   useEffect(() => {
     if (useDemoData) {
-      setMessages([]);
-      setSelectedInsightId(null);
+      setLocalMessages([]);
+      setCloudMessages([]);
+      setSelectedInsightIds({ local: null, cloud: null });
     }
   }, [useDemoData]);
+
+  useEffect(() => {
+    setPendingPrompt(null);
+    setPendingAssistantId(null);
+    setPendingChat(false);
+    setChatError("");
+  }, [chatMode]);
 
   useEffect(() => {
     function syncTabFromHash() {
@@ -421,6 +469,15 @@ export default function App() {
     return () => {
       window.removeEventListener("hashchange", syncTabFromHash);
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const notice = getCheckoutNotice();
+    if (!notice) return;
+    setSystemWarning(notice);
+    const nextUrl = `${window.location.pathname}${window.location.hash || ""}`;
+    window.history.replaceState({}, document.title, nextUrl);
   }, []);
 
   useEffect(() => {
@@ -472,7 +529,7 @@ export default function App() {
       active = false;
       window.clearInterval(intervalId);
     };
-  }, [byokConfig.provider, logs, useByokMode, useDemoData]);
+  }, [byokConfig.provider, currentUser, logs, useByokMode, useDemoData]);
 
   useEffect(() => {
     if (!pendingPrompt || !pendingAssistantId || logs.length === 0 || useByokMode || useDemoData) {
@@ -503,6 +560,39 @@ export default function App() {
     setPendingPrompt(null);
     setPendingAssistantId(null);
   }, [logs, pendingAssistantId, pendingPrompt, useByokMode, useDemoData]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadAccount() {
+      if (useDemoData || useByokMode) {
+        if (active) setAccount(null);
+        return;
+      }
+
+      try {
+        const accountData = await getAuthMe({ useDemo: false });
+        if (!active) return;
+        setCurrentUser(accountData);
+        setAccount(accountData);
+        setAuthError("");
+      } catch (err) {
+        if (!active) return;
+        if (err?.status === 401) {
+          setCurrentUser(null);
+          setAccount(null);
+          setAuthError("");
+          return;
+        }
+        setAuthError(err?.payload?.detail || err.message || "Failed to load account");
+      }
+    }
+
+    loadAccount().catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [billingPending, useByokMode, useDemoData]);
 
   async function handleSend(prompt) {
     const previousTopLogId = logs[0]?.id ?? null;
@@ -540,13 +630,25 @@ export default function App() {
         return;
       }
 
-      if (!useDemoData && chatMode === "cloud") {
+      if (!useDemoData && runtimeChatMode === "cloud") {
         const sessionId = cloudSessionId || createSessionId();
         if (sessionId !== cloudSessionId) {
           setCloudSessionId(sessionId);
         }
 
         const response = await postCloudChat({ message: prompt, sessionId }, { useDemo: false });
+        if (response?.user_id) {
+          setAccount((current) => ({
+            user_id: response.user_id,
+            email: currentUser?.email || current?.email,
+            name: currentUser?.name || current?.name,
+            plan: response.plan || current?.plan || "free",
+            requests_today: response?.usage?.requests_today ?? current?.requests_today ?? 0,
+            limit: response?.usage?.limit ?? current?.limit ?? 20,
+            remaining: response?.usage?.remaining ?? current?.remaining ?? 0,
+            last_updated: current?.last_updated || new Date().toISOString().slice(0, 10),
+          }));
+        }
         const optimisticAssistantContent = normalizeAssistantContent(response, null);
         setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", optimisticAssistantContent, null)]);
 
@@ -659,6 +761,16 @@ export default function App() {
     } catch (err) {
       const errorPayload = err?.payload || null;
       const assistantErrorContent = normalizeAssistantContent(errorPayload, logs[0] || null);
+      if (errorPayload?.user_id) {
+        setAccount((current) => ({
+          user_id: errorPayload.user_id,
+          plan: errorPayload.plan || current?.plan || "free",
+          requests_today: current?.requests_today ?? 0,
+          limit: errorPayload.limit ?? current?.limit ?? 20,
+          remaining: current?.remaining ?? 0,
+          last_updated: current?.last_updated || new Date().toISOString().slice(0, 10),
+        }));
+      }
 
       if (useByokMode) {
         const startedAt = performance.now();
@@ -673,7 +785,7 @@ export default function App() {
         setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, insight)]);
         setLogs((current) => [insight, ...current].slice(0, 50));
         setSelectedInsightId(insight.id);
-      } else if (chatMode === "cloud") {
+      } else if (runtimeChatMode === "cloud") {
         setMessages((current) => [...current, createMessage(assistantMessageId, "assistant", assistantErrorContent, null)]);
         try {
           const { logsData, matchingLog } = await waitForSessionLog(cloudSessionId, previousTopLogId);
@@ -803,20 +915,104 @@ export default function App() {
     }
   }
 
+  async function handleSignup(nextUser) {
+    setAuthPending(true);
+    setAuthError("");
+    try {
+      const user = await signup(nextUser, { useDemo: false });
+      setCurrentUser(user);
+      setAccount(user);
+      setActiveTab("Chat");
+      window.location.hash = "Chat";
+    } catch (err) {
+      setAuthError(err?.payload?.detail || err.message || "Failed to create account");
+    } finally {
+      setAuthPending(false);
+    }
+  }
+
+  async function handleLogin(nextUser) {
+    setAuthPending(true);
+    setAuthError("");
+    try {
+      const user = await login(nextUser, { useDemo: false });
+      setCurrentUser(user);
+      setAccount(user);
+      setActiveTab("Chat");
+      window.location.hash = "Chat";
+    } catch (err) {
+      setAuthError(err?.payload?.detail || err.message || "Failed to log in");
+    } finally {
+      setAuthPending(false);
+    }
+  }
+
+  function handleOAuth(provider) {
+    window.location.assign(getOAuthStartUrl(provider));
+  }
+
+  async function handleLogout() {
+    try {
+      await logout({ useDemo: false });
+    } catch {
+      // clear local state even if backend logout races
+    }
+    setCurrentUser(null);
+    setAccount(null);
+    setLocalMessages([]);
+    setCloudMessages([]);
+    setSelectedInsightIds({ local: null, cloud: null });
+    setChatError("");
+    setSystemWarning("");
+  }
+
+  async function handleCheckout() {
+    if (!currentUser) {
+      setAuthError("Sign in before starting checkout.");
+      return;
+    }
+
+    setBillingPending(true);
+    setSettingsError("");
+    try {
+      const payload = await createCheckoutSession(undefined, { useDemo: false });
+      window.location.assign(payload.url);
+    } catch (err) {
+      setSettingsError(err?.payload?.detail?.error?.message || err?.payload?.detail || err.message || "Failed to create checkout session");
+    } finally {
+      setBillingPending(false);
+    }
+  }
+
   let page = null;
-  if (activeTab === "Chat") {
+  if (!currentUser && !useDemoData && !useByokMode) {
+    page = (
+      <LoginPage
+        onSignup={handleSignup}
+        onLogin={handleLogin}
+        onOAuth={handleOAuth}
+        pending={authPending}
+        error={authError}
+        oauthReady={{
+          google: Boolean(health?.google_oauth_configured),
+          github: Boolean(health?.github_oauth_configured),
+        }}
+      />
+    );
+  } else if (activeTab === "Chat") {
     page = (
       <ChatPage
         messages={messages}
         pending={pendingChat}
         onSend={handleSend}
         selectedInsightId={selectedInsightId}
-        onSelectInsight={setSelectedInsightId}
+        onSelectInsight={(value) => setSelectedInsightIds((current) => ({ ...current, [activeModeKey]: value }))}
         selectedInsight={selectedInsight}
         modeLabel={useByokMode ? "BYOK" : useDemoData ? "Demo" : "Proxy"}
-        chatMode={chatMode}
+        chatMode={runtimeChatMode}
         onChatModeChange={setChatMode}
         sessionId={cloudSessionId}
+        modeLocked={accountBillingMode}
       />
     );
   } else if (activeTab === "Dashboard") {
@@ -837,6 +1033,8 @@ export default function App() {
   } else if (activeTab === "Settings") {
     page = (
       <Settings
+        user={currentUser}
+        account={account}
         health={health}
         providerConfig={effectiveProviderConfig}
         openrouterDraft={openrouterDraft}
@@ -844,6 +1042,8 @@ export default function App() {
         onSaveOpenrouterKey={handleSaveOpenrouterKey}
         onClearOpenrouterKey={handleClearOpenrouterKey}
         savingProviderConfig={savingProviderConfig}
+        onCheckout={handleCheckout}
+        billingPending={billingPending}
       />
     );
   } else {
@@ -863,27 +1063,37 @@ export default function App() {
           </div>
         </div>
         <div className="topbar__status">
+          {currentUser && !useDemoData && !useByokMode ? (
+            <div className="topbar__identity">
+              <span>{currentUser.email}</span>
+              <button type="button" onClick={handleLogout}>
+                Sign out
+              </button>
+            </div>
+          ) : null}
           <span className={`status-pill ${currentStatusClass}`}>{currentStatusLabel}</span>
         </div>
       </header>
 
-      <nav className="tabs" aria-label="Primary">
-        <div className="tabs__rail">
-          {TABS.map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              className={`tab-button ${activeTab === tab ? "tab-button--active" : ""}`}
-              onClick={() => {
-                setActiveTab(tab);
-                window.location.hash = tab;
-              }}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-      </nav>
+      {currentUser || useDemoData || useByokMode ? (
+        <nav className="tabs" aria-label="Primary">
+          <div className="tabs__rail">
+            {TABS.map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={`tab-button ${activeTab === tab ? "tab-button--active" : ""}`}
+                onClick={() => {
+                  setActiveTab(tab);
+                  window.location.hash = tab;
+                }}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+        </nav>
+      ) : null}
 
       {DEMO_MODE ? (
         <PublicAccessPanel

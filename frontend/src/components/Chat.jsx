@@ -11,6 +11,7 @@ export default function Chat({
   chatMode,
   onChatModeChange,
   sessionId,
+  modeLocked,
 }) {
   const [input, setInput] = useState("");
 
@@ -47,7 +48,7 @@ export default function Chat({
                   : "Local mode sends prompts through the OpenAI-compatible proxy endpoint."}
           </p>
         </div>
-        {modeLabel === "Proxy" ? (
+        {modeLabel === "Proxy" && !modeLocked ? (
           <div className="chat-mode-switch" role="tablist" aria-label="Chat runtime mode">
             <button
               type="button"
@@ -66,6 +67,13 @@ export default function Chat({
           </div>
         ) : null}
       </div>
+
+      {modeLabel === "Proxy" && modeLocked ? (
+        <div className="chat-session-meta">
+          <span>Runtime</span>
+          <strong>Cloud Mode locked for account billing</strong>
+        </div>
+      ) : null}
 
       {modeLabel === "Proxy" && chatMode === "cloud" ? (
         <div className="chat-session-meta">

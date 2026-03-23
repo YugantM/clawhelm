@@ -12,11 +12,15 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       proxy: {
+        "/auth": proxyTarget,
+        "/chat": proxyTarget,
+        "/create-checkout-session": proxyTarget,
         "/logs": proxyTarget,
         "/stats": proxyTarget,
         "/health": proxyTarget,
         "/config": proxyTarget,
         "/refresh-models": proxyTarget,
+        "/user": proxyTarget,
         "/v1": proxyTarget,
       },
     },

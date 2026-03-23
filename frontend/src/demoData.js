@@ -1,7 +1,4 @@
-const IS_GITHUB_PAGES =
-  typeof window !== "undefined" && window.location.hostname.endsWith("github.io");
-
-export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true" || IS_GITHUB_PAGES;
+export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 
 export const demoStats = {
   total_requests: 29,
