@@ -9,9 +9,6 @@ from pydantic import BaseModel
 class LogEntry(BaseModel):
     id: int
     timestamp: datetime
-    user_id: str | None
-    request_count: int | None
-    session_id: str | None
     request_source: str | None
     original_model: str | None
     selected_model: str | None
@@ -67,54 +64,66 @@ class ChatRequest(BaseModel):
     model: str | None = None
     message: str | None = None
     messages: list[dict[str, Any]] | None = None
-    session_id: str | None = None
-    user_id: str | None = None
 
 
 class ChatModelOption(BaseModel):
     id: str
     label: str
     model_id: str | None = None
-    endpoint: str
     is_free: bool
     recommended: bool = False
 
 
-class CheckoutSessionRequest(BaseModel):
-    user_id: str | None = None
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    name: str | None
+    provider: str
+    avatar_url: str | None
+    created_at: str
 
 
-class UserAccountResponse(BaseModel):
-    user_id: str
-    plan: str
-    is_superuser: bool = False
-    requests_today: int
-    limit: int
-    remaining: int | None
-    last_updated: str
+class SessionMessageResponse(BaseModel):
+    id: int
+    role: str
+    content: str
+    meta: dict[str, Any] | None
+    created_at: str
 
 
-class AuthFormRequest(BaseModel):
+class SessionResponse(BaseModel):
+    id: str
+    title: str | None
+    created_at: str
+    last_accessed_at: str
+    message_count: int | None = None
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
+class SessionChatRequest(BaseModel):
+    messages: list[dict[str, Any]]
+    session_id: str | None = None
+
+
+class CreateSessionRequest(BaseModel):
+    title: str | None = None
+
+
+class UpdateSessionRequest(BaseModel):
+    title: str
+
+
+class SignupRequest(BaseModel):
     email: str
     password: str
     name: str | None = None
 
 
-class AuthUserResponse(BaseModel):
-    user_id: str
+class LoginRequest(BaseModel):
     email: str
-    name: str
-    plan: str
-    is_superuser: bool = False
-    requests_today: int
-    limit: int
-    remaining: int | None
-    last_updated: str
-
-
-class SessionResponse(BaseModel):
-    session_id: str
-    messages: list[dict[str, Any]]
-    style_profile: dict[str, Any]
-    metadata: dict[str, Any]
-    summary: str | None = None
+    password: str

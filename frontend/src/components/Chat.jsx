@@ -1,169 +1,78 @@
 import { useEffect, useRef, useState } from "react";
 import Message from "./Message";
-import ModelSelector from "./ModelSelector";
-import { getChatModels } from "../api";
 
-const CHAT_MODEL_STORAGE_KEY = "clawhelm_selected_chat_model";
-
-export default function Chat({
-  messages,
-  pending,
-  onSend,
-  requireLoginForManualModels,
-  onRequireLogin,
-  onModelSelectionChange,
-  selectedInsightId,
-  onSelectInsight,
-  modeLabel,
-  chatMode,
-  onChatModeChange,
-  sessionId,
-  modeLocked,
-}) {
+export default function Chat({ messages, pending, onSend }) {
   const [input, setInput] = useState("");
-  const [modelOptions, setModelOptions] = useState([
-    { id: "auto", label: "Auto (recommended)", endpoint: "/chat" },
-  ]);
-  const [selectedModel, setSelectedModel] = useState(() => {
-    if (typeof window === "undefined") return "auto";
-    return window.localStorage.getItem(CHAT_MODEL_STORAGE_KEY) || "auto";
-  });
   const threadRef = useRef(null);
   const submitLockRef = useRef(false);
 
-  function handleModelChange(nextModel) {
-    if (requireLoginForManualModels && nextModel !== "auto") {
-      setSelectedModel("auto");
-      onRequireLogin?.();
-      return;
-    }
-    if (onModelSelectionChange && onModelSelectionChange(nextModel) === false) {
-      return;
-    }
-    setSelectedModel(nextModel);
-  }
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(CHAT_MODEL_STORAGE_KEY, selectedModel);
-  }, [selectedModel]);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadModelOptions() {
-      try {
-        const payload = await getChatModels({ useDemo: false });
-        if (!active || !Array.isArray(payload) || payload.length === 0) return;
-        const normalized = payload
-          .filter((option) => typeof option?.id === "string" && typeof option?.label === "string")
-          .map((option) => ({
-            id: option.id,
-            label:
-              option.id === "auto"
-                ? `${option.label} (recommended)`
-                : option.is_free
-                  ? `${option.label} (free)`
-                  : option.label,
-            endpoint: typeof option.endpoint === "string" && option.endpoint.trim() ? option.endpoint.trim() : "/chat",
-          }));
-
-        if (normalized.length > 0) {
-          setModelOptions(normalized);
-        }
-      } catch {
-        // Keep Auto-only fallback if endpoint config is unavailable.
-      }
-    }
-
-    loadModelOptions().catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, []);
-
   useEffect(() => {
     if (!threadRef.current) return;
-    threadRef.current.scrollTo({
-      top: threadRef.current.scrollHeight,
-      behavior: "smooth",
-    });
+    threadRef.current.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, pending]);
 
-  async function submitPrompt() {
+  async function submit() {
     const value = input.trim();
     if (!value || pending || submitLockRef.current) return;
     submitLockRef.current = true;
     setInput("");
     try {
-      await onSend(value, selectedModel);
+      await onSend(value);
     } finally {
       submitLockRef.current = false;
     }
   }
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-    await submitPrompt();
-  }
-
-  async function handleKeyDown(event) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      await submitPrompt();
-    }
-  }
-
   return (
-    <section className="chat-shell">
-      <div className="chat-thread" ref={threadRef}>
+    <div className="chat">
+      <div className="chat__thread" ref={threadRef}>
         {messages.length === 0 ? (
-          <div className="chat-empty">
-            <h3>Ask anything.</h3>
-            <p>We find the best answer across AI models — automatically.</p>
+          <div className="chat__empty">
+            <h1 className="chat__empty-title">ClawHelm</h1>
+            <p className="chat__empty-sub">Ask anything. The best model answers.</p>
+            <div className="chat__suggestions">
+              <button type="button" onClick={() => { setInput("Explain quantum computing in simple terms"); }}>
+                Explain quantum computing
+              </button>
+              <button type="button" onClick={() => { setInput("Write a Python function to merge two sorted lists"); }}>
+                Merge sorted lists in Python
+              </button>
+              <button type="button" onClick={() => { setInput("What are the pros and cons of microservices?"); }}>
+                Microservices pros &amp; cons
+              </button>
+            </div>
           </div>
         ) : (
-          messages.map((message) => (
-            <Message
-              key={message.id}
-              role={message.role}
-              content={message.content}
-              insight={message.insight}
-              active={selectedInsightId === message.insight?.id}
-              onSelect={() => {
-                if (message.insight) onSelectInsight(message.insight.id);
-              }}
-            />
+          messages.map((msg) => (
+            <Message key={msg.id} role={msg.role} content={msg.content} meta={msg.meta} />
           ))
         )}
         {pending ? (
-          <div className="message-row message-row--assistant">
-            <div className="message-bubble message-bubble--assistant message-bubble--loading" aria-live="polite">
-              <span className="message-bubble__meta">ClawHelm</span>
-              <p>Thinking...</p>
+          <div className="message message--assistant">
+            <div className="message__bubble message__bubble--assistant message__bubble--loading">
+              <div className="typing-dots"><span /><span /><span /></div>
             </div>
           </div>
         ) : null}
       </div>
 
-      <form className="chat-composer" onSubmit={handleSubmit}>
-        <div className="chat-composer__model-row">
-          <ModelSelector value={selectedModel} onChange={handleModelChange} options={modelOptions} />
-        </div>
+      <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <textarea
+          className="composer__input"
           value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask clawhelm something..."
-          rows={3}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+          }}
+          placeholder="Message ClawHelm..."
+          rows={1}
         />
-        <div className="chat-composer__footer">
-          <span className="chat-composer__hint">⚡ Optimized for speed, cost, and quality</span>
-          <button type="submit" disabled={pending}>
-            {pending ? "Sending..." : "Send"}
-          </button>
-        </div>
+        <button type="submit" className="composer__send" disabled={pending || !input.trim()} aria-label="Send">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M3 10h14M11 4l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
       </form>
-    </section>
+    </div>
   );
 }

@@ -1,119 +1,159 @@
 from __future__ import annotations
 
+import asyncio
 import os
-from urllib.parse import urlencode
+from abc import ABC, abstractmethod
+from typing import Any
 
 import httpx
-from fastapi import HTTPException
 
 
-def _require_env(name: str) -> str:
-    value = os.getenv(name, "").strip()
-    if not value:
-        raise HTTPException(status_code=503, detail=f"{name} is not configured")
-    return value
+class OAuthClient(ABC):
+    def __init__(
+        self,
+        provider: str,
+        client_id: str,
+        client_secret: str,
+        redirect_uri: str,
+    ):
+        self.provider = provider
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.redirect_uri = redirect_uri
+
+    @abstractmethod
+    def get_authorization_url(self, state: str) -> str:
+        pass
+
+    @abstractmethod
+    async def exchange_code_for_token(self, code: str) -> dict[str, Any]:
+        pass
+
+    @abstractmethod
+    async def get_user_info(self, access_token: str) -> dict[str, Any]:
+        pass
 
 
-def build_google_auth_url(*, state: str, redirect_uri: str) -> str:
-    query = urlencode(
-        {
-            "client_id": _require_env("GOOGLE_CLIENT_ID"),
-            "redirect_uri": redirect_uri,
+class GoogleOAuthClient(OAuthClient):
+    AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+    TOKEN_URL = "https://oauth2.googleapis.com/token"
+    USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+    SCOPES = ["openid", "email", "profile"]
+
+    def get_authorization_url(self, state: str) -> str:
+        params = {
+            "client_id": self.client_id,
+            "redirect_uri": self.redirect_uri,
             "response_type": "code",
-            "scope": "openid email profile",
+            "scope": " ".join(self.SCOPES),
             "state": state,
             "access_type": "offline",
-            "prompt": "consent",
         }
-    )
-    return f"https://accounts.google.com/o/oauth2/v2/auth?{query}"
+        query_string = "&".join(f"{k}={v}" for k, v in params.items())
+        return f"{self.AUTHORIZE_URL}?{query_string}"
+
+    async def exchange_code_for_token(self, code: str) -> dict[str, Any]:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                self.TOKEN_URL,
+                data={
+                    "code": code,
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "redirect_uri": self.redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def get_user_info(self, access_token: str) -> dict[str, Any]:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                self.USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            response.raise_for_status()
+            data = response.json()
+            return {
+                "provider_user_id": data["sub"],
+                "email": data["email"],
+                "name": data.get("name"),
+                "avatar_url": data.get("picture"),
+            }
 
 
-def build_github_auth_url(*, state: str, redirect_uri: str) -> str:
-    query = urlencode(
-        {
-            "client_id": _require_env("GITHUB_CLIENT_ID"),
-            "redirect_uri": redirect_uri,
-            "scope": "read:user user:email",
+class GitHubOAuthClient(OAuthClient):
+    AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
+    TOKEN_URL = "https://github.com/login/oauth/access_token"
+    USERINFO_URL = "https://api.github.com/user"
+    EMAIL_URL = "https://api.github.com/user/emails"
+    SCOPES = ["user:email"]
+
+    def get_authorization_url(self, state: str) -> str:
+        params = {
+            "client_id": self.client_id,
+            "redirect_uri": self.redirect_uri,
+            "scope": ",".join(self.SCOPES),
             "state": state,
         }
-    )
-    return f"https://github.com/login/oauth/authorize?{query}"
+        query_string = "&".join(f"{k}={v}" for k, v in params.items())
+        return f"{self.AUTHORIZE_URL}?{query_string}"
 
+    async def exchange_code_for_token(self, code: str) -> dict[str, Any]:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                self.TOKEN_URL,
+                data={
+                    "code": code,
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "redirect_uri": self.redirect_uri,
+                },
+                headers={"Accept": "application/json"},
+            )
+            response.raise_for_status()
+            return response.json()
 
-async def fetch_google_identity(*, code: str, redirect_uri: str) -> dict[str, str]:
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        token_response = await client.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "client_id": _require_env("GOOGLE_CLIENT_ID"),
-                "client_secret": _require_env("GOOGLE_CLIENT_SECRET"),
-                "code": code,
-                "grant_type": "authorization_code",
-                "redirect_uri": redirect_uri,
-            },
-        )
-        token_response.raise_for_status()
-        token_payload = token_response.json()
-        access_token = token_payload.get("access_token")
-        if not isinstance(access_token, str) or not access_token:
-            raise HTTPException(status_code=502, detail="Google OAuth access token missing")
-
-        userinfo_response = await client.get(
-            "https://openidconnect.googleapis.com/v1/userinfo",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        userinfo_response.raise_for_status()
-        payload = userinfo_response.json()
-    email = payload.get("email")
-    subject = payload.get("sub")
-    name = payload.get("name") or payload.get("given_name") or "Google User"
-    if not isinstance(email, str) or not isinstance(subject, str):
-        raise HTTPException(status_code=502, detail="Google account is missing email identity")
-    return {"provider_user_id": subject, "email": email.lower(), "name": str(name)}
-
-
-async def fetch_github_identity(*, code: str, redirect_uri: str) -> dict[str, str]:
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        token_response = await client.post(
-            "https://github.com/login/oauth/access_token",
-            headers={"Accept": "application/json"},
-            data={
-                "client_id": _require_env("GITHUB_CLIENT_ID"),
-                "client_secret": _require_env("GITHUB_CLIENT_SECRET"),
-                "code": code,
-                "redirect_uri": redirect_uri,
-            },
-        )
-        token_response.raise_for_status()
-        token_payload = token_response.json()
-        access_token = token_payload.get("access_token")
-        if not isinstance(access_token, str) or not access_token:
-            raise HTTPException(status_code=502, detail="GitHub OAuth access token missing")
-
+    async def get_user_info(self, access_token: str) -> dict[str, Any]:
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Accept": "application/vnd.github+json",
+            "Accept": "application/vnd.github.v3+json",
         }
-        user_response = await client.get("https://api.github.com/user", headers=headers)
-        user_response.raise_for_status()
-        user_payload = user_response.json()
+        async with httpx.AsyncClient() as client:
+            user_response = await client.get(self.USERINFO_URL, headers=headers)
+            user_response.raise_for_status()
+            user_data = user_response.json()
 
-        emails_response = await client.get("https://api.github.com/user/emails", headers=headers)
-        emails_response.raise_for_status()
-        emails_payload = emails_response.json()
+            email_response = await client.get(self.EMAIL_URL, headers=headers)
+            email_response.raise_for_status()
+            email_data = email_response.json()
 
-    provider_user_id = user_payload.get("id")
-    name = user_payload.get("name") or user_payload.get("login") or "GitHub User"
-    email = None
-    if isinstance(emails_payload, list):
-        primary = next((entry for entry in emails_payload if entry.get("primary") and entry.get("verified")), None)
-        fallback = next((entry for entry in emails_payload if entry.get("verified")), None)
-        chosen = primary or fallback
-        if isinstance(chosen, dict):
-            email = chosen.get("email")
+            primary_email = next(
+                (e["email"] for e in email_data if e["primary"]), email_data[0]["email"] if email_data else None
+            )
 
-    if provider_user_id is None or not isinstance(email, str):
-        raise HTTPException(status_code=502, detail="GitHub account is missing a verified email")
+            return {
+                "provider_user_id": str(user_data["id"]),
+                "email": primary_email or user_data.get("email"),
+                "name": user_data.get("name"),
+                "avatar_url": user_data.get("avatar_url"),
+            }
 
-    return {"provider_user_id": str(provider_user_id), "email": email.lower(), "name": str(name)}
+
+def create_oauth_client(provider: str) -> OAuthClient | None:
+    if provider == "google":
+        # Support both Railway naming (GOOGLE_CLIENT_ID) and explicit naming
+        client_id = os.getenv("GOOGLE_CLIENT_ID") or os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+        client_secret = os.getenv("GOOGLE_CLIENT_SECRET") or os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+        redirect_uri = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
+        if client_id and client_secret:
+            return GoogleOAuthClient(provider, client_id, client_secret, redirect_uri)
+    elif provider == "github":
+        # Support both Railway naming (GITHUB_CLIENT_ID) and explicit naming
+        client_id = os.getenv("GITHUB_CLIENT_ID") or os.getenv("GITHUB_OAUTH_CLIENT_ID")
+        client_secret = os.getenv("GITHUB_CLIENT_SECRET") or os.getenv("GITHUB_OAUTH_CLIENT_SECRET")
+        redirect_uri = os.getenv("GITHUB_OAUTH_REDIRECT_URI", "http://localhost:8000/auth/github/callback")
+        if client_id and client_secret:
+            return GitHubOAuthClient(provider, client_id, client_secret, redirect_uri)
+    return None

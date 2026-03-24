@@ -51,4 +51,3 @@ def get_score_components(stats: dict[str, float | int], model: dict[str, Any] | 
         "confidence": 1.0 if sample_count > 0 else 0.0,
         "score": score_model(model or {}, stats),
     }
-

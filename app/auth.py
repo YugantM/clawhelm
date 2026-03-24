@@ -1,54 +1,62 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
-from secrets import token_hex, token_urlsafe
+from typing import Any
 
-AUTH_COOKIE_NAME = "clawhelm_session"
-SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
-
-
-def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+import jwt
 
 
-def isoformat(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat()
+class JWTManager:
+    def __init__(
+        self,
+        secret_key: str | None = None,
+        algorithm: str = "HS256",
+        expires_in_seconds: int = 30 * 24 * 3600,
+    ):
+        self.secret_key = secret_key or os.getenv("JWT_SECRET_KEY", "secret-dev-key")
+        self.algorithm = algorithm
+        self.expires_in_seconds = expires_in_seconds
+
+    def create_token(self, user_id: int, expires_in: int | None = None) -> str:
+        expires_in = expires_in or self.expires_in_seconds
+        now = datetime.now(timezone.utc)
+        payload = {
+            "user_id": user_id,
+            "iat": now,
+            "exp": now + timedelta(seconds=expires_in),
+        }
+        return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+
+    def verify_token(self, token: str) -> dict[str, Any] | None:
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            return payload
+        except jwt.InvalidTokenError:
+            return None
+
+    def refresh_token(self, old_token: str) -> str | None:
+        payload = self.verify_token(old_token)
+        if payload:
+            return self.create_token(payload["user_id"])
+        return None
 
 
-def build_password_hash(password: str) -> str:
-    salt = token_hex(16)
-    derived_key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 200_000)
-    return f"{salt}${derived_key.hex()}"
+jwt_manager = JWTManager()
 
 
-def verify_password(password: str, password_hash: str | None) -> bool:
-    if not password_hash or "$" not in password_hash:
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    hashed = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 260000)
+    return f"{salt}:{hashed.hex()}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        salt, hashed = stored_hash.split(":", 1)
+        check = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 260000)
+        return check.hex() == hashed
+    except Exception:
         return False
-    salt, stored_hash = password_hash.split("$", 1)
-    candidate_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 200_000).hex()
-    return hmac.compare_digest(candidate_hash, stored_hash)
-
-
-def generate_session_token() -> str:
-    return token_urlsafe(32)
-
-
-def hash_session_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def get_session_expiry() -> datetime:
-    return utcnow() + timedelta(days=SESSION_TTL_DAYS)
-
-
-def is_secure_cookie(frontend_base_url: str | None) -> bool:
-    if not frontend_base_url:
-        return False
-    return frontend_base_url.startswith("https://")
-
-
-def cookie_samesite(frontend_base_url: str | None) -> str:
-    return "none" if is_secure_cookie(frontend_base_url) else "lax"

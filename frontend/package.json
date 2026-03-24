@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:pages": "VITE_BASE_PATH=/clawhelm/ VITE_API_BASE_URL=https://clawhelm-api-production.up.railway.app vite build",
+    "deploy": "npm run build:pages && gh-pages -d dist"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -14,6 +16,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.2",
+    "gh-pages": "^6.3.0",
     "vite": "^8.0.1"
   }
 }
