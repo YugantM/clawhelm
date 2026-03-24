@@ -5,3 +5,4 @@ pytest
 pytest-asyncio
 asgi-lifespan
 python-dotenv
+PyJWT
