@@ -1,0 +1,56 @@
+<svg width="760" height="220" viewBox="0 0 760 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="wheelTone" x1="24" y1="18" x2="170" y2="182" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#58C7FF"/>
+      <stop offset="0.45" stop-color="#2D7BFF"/>
+      <stop offset="1" stop-color="#3D4BFF"/>
+    </linearGradient>
+    <linearGradient id="spokeTone" x1="52" y1="44" x2="126" y2="126" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B6ECFF"/>
+      <stop offset="1" stop-color="#5A7CFF"/>
+    </linearGradient>
+    <linearGradient id="dialAccent" x1="66" y1="62" x2="103" y2="103" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D7F8FF"/>
+      <stop offset="1" stop-color="#63D6FF"/>
+    </linearGradient>
+    <filter id="shadow" x="8" y="8" width="190" height="190" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#050816" flood-opacity="0.42"/>
+    </filter>
+  </defs>
+  <rect width="760" height="220" fill="#0C1020"/>
+  <g transform="translate(26 24)" filter="url(#shadow)">
+    <circle cx="82" cy="82" r="59" stroke="url(#wheelTone)" stroke-width="10"/>
+    <path d="M82 43V62" stroke="url(#spokeTone)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M82 102V121" stroke="url(#spokeTone)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M43 82H62" stroke="url(#spokeTone)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M102 82H121" stroke="url(#spokeTone)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M54.4 54.4L67.8 67.8" stroke="url(#spokeTone)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M96.2 96.2L109.6 109.6" stroke="url(#spokeTone)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M109.6 54.4L96.2 67.8" stroke="url(#spokeTone)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M67.8 96.2L54.4 109.6" stroke="url(#spokeTone)" stroke-width="8" stroke-linecap="round"/>
+    <path d="M82 24V43" stroke="url(#wheelTone)" stroke-width="9" stroke-linecap="round"/>
+    <path d="M82 121V140" stroke="url(#wheelTone)" stroke-width="9" stroke-linecap="round"/>
+    <path d="M24 82H43" stroke="url(#wheelTone)" stroke-width="9" stroke-linecap="round"/>
+    <path d="M121 82H140" stroke="url(#wheelTone)" stroke-width="9" stroke-linecap="round"/>
+    <path d="M40.3 40.3L54.4 54.4" stroke="url(#wheelTone)" stroke-width="9" stroke-linecap="round"/>
+    <path d="M109.6 109.6L123.7 123.7" stroke="url(#wheelTone)" stroke-width="9" stroke-linecap="round"/>
+    <path d="M123.7 40.3L109.6 54.4" stroke="url(#wheelTone)" stroke-width="9" stroke-linecap="round"/>
+    <path d="M54.4 109.6L40.3 123.7" stroke="url(#wheelTone)" stroke-width="9" stroke-linecap="round"/>
+    <circle cx="82" cy="20" r="6.5" fill="url(#wheelTone)"/>
+    <circle cx="82" cy="144" r="6.5" fill="url(#wheelTone)"/>
+    <circle cx="20" cy="82" r="6.5" fill="url(#wheelTone)"/>
+    <circle cx="144" cy="82" r="6.5" fill="url(#wheelTone)"/>
+    <circle cx="35.7" cy="35.7" r="6.5" fill="url(#wheelTone)"/>
+    <circle cx="128.3" cy="35.7" r="6.5" fill="url(#wheelTone)"/>
+    <circle cx="35.7" cy="128.3" r="6.5" fill="url(#wheelTone)"/>
+    <circle cx="128.3" cy="128.3" r="6.5" fill="url(#wheelTone)"/>
+    <circle cx="82" cy="82" r="20" fill="#12182B" stroke="url(#spokeTone)" stroke-width="7"/>
+    <circle cx="82" cy="82" r="6.5" fill="url(#dialAccent)"/>
+    <path d="M82 82L106 66" stroke="url(#dialAccent)" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="106" cy="66" r="3.5" fill="url(#dialAccent)"/>
+  </g>
+  <g transform="translate(224 66)">
+    <text x="0" y="42" fill="#F8FAFC" font-family="Sora, Manrope, Inter, Arial, sans-serif" font-size="64" font-weight="700" letter-spacing="-0.05em">ClawHelm</text>
+    <text x="2" y="78" fill="#94A3C7" font-family="Sora, Manrope, Inter, Arial, sans-serif" font-size="19" font-weight="500" letter-spacing="-0.02em">Adaptive LLM routing dashboard</text>
+  </g>
+</svg>
