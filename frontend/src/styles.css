@@ -330,18 +330,8 @@ button, textarea, input, select { font: inherit; }
 }
 
 .app-header__icon {
-  width: 28px;
-  height: 28px;
-}
-
-.app-header__name {
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  background: var(--brand-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  width: 32px;
+  height: 32px;
 }
 
 .app-header__actions {
@@ -468,6 +458,12 @@ button, textarea, input, select { font: inherit; }
   font-size: 2.4rem;
   font-weight: 800;
   letter-spacing: -0.03em;
+  opacity: 0.55;
+}
+.chat__empty-title--white {
+  color: #ffffff;
+}
+.chat__empty-title--gradient {
   background: var(--brand-gradient);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -813,6 +809,11 @@ button, textarea, input, select { font: inherit; }
 .login-modal__brand {
   font-size: 1.5rem;
   font-weight: 800;
+}
+.brand--white {
+  color: #ffffff;
+}
+.brand--gradient {
   background: var(--brand-gradient);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -950,5 +951,4 @@ button, textarea, input, select { font: inherit; }
   .chat__empty-title { font-size: 1.8rem; }
   .settings-grid { grid-template-columns: 1fr; }
   .modal-card { max-width: 100%; }
-  .app-header__name { display: none; }
 }

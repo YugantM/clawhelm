@@ -28,7 +28,7 @@ export default function Chat({ messages, pending, onSend, currentUser }) {
       <div className="chat__thread" ref={threadRef}>
         {messages.length === 0 ? (
           <div className="chat__empty">
-            <h1 className="chat__empty-title">ClawHelm</h1>
+            <h1 className="chat__empty-title"><span className="chat__empty-title--white">Claw</span><span className="chat__empty-title--gradient">Helm</span></h1>
             <p className="chat__empty-sub">
               {currentUser
                 ? `Welcome back${currentUser.name ? `, ${currentUser.name}` : ""}. Ask anything.`

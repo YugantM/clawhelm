@@ -68,7 +68,7 @@ export default function LoginModal({ isOpen, onLoginSuccess, onSkip, authError }
     <div className="login-modal-overlay">
       <div className="login-modal">
         <div className="login-modal__logo">
-          <span className="login-modal__brand">ClawHelm</span>
+          <span className="login-modal__brand"><span className="brand--white">Claw</span><span className="brand--gradient">Helm</span></span>
         </div>
 
         <h2 className="login-modal__title">

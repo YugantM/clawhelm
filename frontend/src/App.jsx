@@ -91,53 +91,48 @@ export default function App() {
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
-  // Check authentication status on mount
+  // Check authentication on mount — handles both OAuth callback and normal load
   useEffect(() => {
     let active = true;
-    async function checkAuth() {
+
+    async function initAuth() {
+      // Step 1: check for OAuth callback params FIRST
+      const params = new URLSearchParams(window.location.search);
+      const oauthToken = params.get("auth_token");
+      if (oauthToken) {
+        setAuthToken(oauthToken);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (params.has("auth_error")) {
+        const error = params.get("auth_error");
+        if (active) setAuthError(error);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      // Step 2: now check the current user (token is already saved if OAuth)
       try {
         const user = await getCurrentUser();
-        if (active) {
-          if (user) {
-            setCurrentUser(user);
-            setShowLoginModal(false);
-          } else {
-            const hasKey = localStorage.getItem("openrouter_api_key");
-            setHasOfflineKey(!!hasKey);
-            setShowLoginModal(!hasKey);
-          }
-        }
-      } catch (err) {
-        console.log("Auth check error:", err);
-        const hasKey = localStorage.getItem("openrouter_api_key");
-        if (active) {
+        if (!active) return;
+        if (user) {
+          setCurrentUser(user);
+          setShowLoginModal(false);
+        } else {
+          const hasKey = localStorage.getItem("openrouter_api_key");
           setHasOfflineKey(!!hasKey);
           setShowLoginModal(!hasKey);
         }
+      } catch (err) {
+        console.log("Auth check error:", err);
+        if (!active) return;
+        const hasKey = localStorage.getItem("openrouter_api_key");
+        setHasOfflineKey(!!hasKey);
+        setShowLoginModal(!hasKey);
       } finally {
         if (active) setAuthCheckDone(true);
       }
     }
-    checkAuth();
-    return () => { active = false; };
-  }, []);
 
-  // Check for auth query params (OAuth callback)
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get("auth_token");
-    if (token) {
-      setAuthToken(token);
-      window.history.replaceState({}, document.title, window.location.pathname);
-      setShowLoginModal(false);
-      getCurrentUser().then((user) => {
-        if (user) setCurrentUser(user);
-      });
-    } else if (params.has("auth_error")) {
-      const error = params.get("auth_error");
-      setAuthError(error);
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
+    initAuth();
+    return () => { active = false; };
   }, []);
 
   // Load sessions when user logs in
@@ -199,13 +194,17 @@ export default function App() {
         setActiveSessionId(sessionId);
         setSessions((prev) => [session, ...prev]);
       } catch (err) {
-        console.log("Failed to create session:", err);
+        console.error("Failed to create session:", err);
       }
     }
 
     // Save user message to session
     if (currentUser && sessionId) {
-      addSessionMessage(sessionId, "user", prompt).catch(() => {});
+      try {
+        await addSessionMessage(sessionId, "user", prompt);
+      } catch (err) {
+        console.error("Failed to save user message:", err);
+      }
     }
 
     try {
@@ -218,7 +217,11 @@ export default function App() {
 
       // Save assistant message to session
       if (currentUser && sessionId) {
-        addSessionMessage(sessionId, "assistant", content, meta).catch(() => {});
+        try {
+          await addSessionMessage(sessionId, "assistant", content, meta);
+        } catch (err) {
+          console.error("Failed to save assistant message:", err);
+        }
       }
     } catch (err) {
       const payload = err?.payload || null;
@@ -354,8 +357,7 @@ export default function App() {
             </svg>
           </button>
           <div className="app-header__brand">
-            <img className="app-header__icon" src={iconSrc} alt="" aria-hidden="true" />
-            <strong className="app-header__name">ClawHelm</strong>
+            <img className="app-header__icon" src={iconSrc} alt="ClawHelm" />
           </div>
         </div>
 
