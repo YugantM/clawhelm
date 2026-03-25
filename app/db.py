@@ -72,6 +72,7 @@ class Database:
             self._ensure_column(connection, "users", "password_hash", "TEXT")
             self._ensure_column(connection, "users", "provider_user_id", "TEXT")
             self._migrate_users_table(connection)
+            self._migrate_sessions_tables(connection)
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -191,6 +192,40 @@ class Database:
                 f"INSERT INTO users ({col_list}) SELECT {col_list} FROM _users_old"
             )
         connection.execute("DROP TABLE _users_old")
+
+    @staticmethod
+    def _migrate_sessions_tables(connection: sqlite3.Connection) -> None:
+        """Drop and recreate sessions/session_messages if schema is wrong."""
+        tables = {
+            row["name"]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+
+        # Check sessions table schema
+        if "sessions" in tables:
+            cols = {
+                c["name"]
+                for c in connection.execute("PRAGMA table_info(sessions)").fetchall()
+            }
+            required = {"id", "user_id", "created_at", "last_accessed_at", "title"}
+            if not required.issubset(cols):
+                # Schema mismatch — drop and let CREATE TABLE IF NOT EXISTS rebuild it
+                connection.execute("DROP TABLE IF EXISTS session_messages")
+                connection.execute("DROP TABLE IF EXISTS sessions")
+
+        # Check session_messages table schema
+        if "session_messages" in tables:
+            cols = {
+                c["name"]
+                for c in connection.execute(
+                    "PRAGMA table_info(session_messages)"
+                ).fetchall()
+            }
+            required = {"id", "session_id", "role", "content", "meta", "created_at"}
+            if not required.issubset(cols):
+                connection.execute("DROP TABLE IF EXISTS session_messages")
 
     async def insert_log(
         self,
