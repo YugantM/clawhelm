@@ -125,3 +125,11 @@ export function getSession(sessionId) {
 export function deleteSession(sessionId) {
   return fetchJson(`/sessions/${sessionId}`, { method: "DELETE" });
 }
+
+export function addSessionMessage(sessionId, role, content, meta = null) {
+  return fetchJson(`/sessions/${sessionId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role, content, meta }),
+  });
+}

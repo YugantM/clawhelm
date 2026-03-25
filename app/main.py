@@ -6,15 +6,18 @@ import uuid
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
+import json as json_mod
+
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from .auth import hash_password, jwt_manager, verify_password
 from .db import db
 from .models import (
+    AddMessageRequest,
     AuthTokenResponse,
     ChatModelOption,
     ChatRequest,
@@ -24,6 +27,7 @@ from .models import (
     ProviderApiKeyUpdate,
     ProviderConfigResponse,
     SessionChatRequest,
+    SessionMessageResponse,
     SessionResponse,
     SignupRequest,
     StatsResponse,
@@ -71,12 +75,13 @@ app.add_middleware(
 )
 
 # OAuth state tracking for CSRF protection
-_oauth_states: dict[str, str] = {}
+# Maps state token -> {"redirect_to": "https://..."} or empty dict
+_oauth_states: dict[str, dict] = {}
 
 
-def _generate_oauth_state() -> str:
+def _generate_oauth_state(redirect_to: str | None = None) -> str:
     state = secrets.token_urlsafe(32)
-    _oauth_states[state] = state
+    _oauth_states[state] = {"redirect_to": redirect_to} if redirect_to else {}
     return state
 
 
@@ -84,8 +89,8 @@ def _verify_oauth_state(state: str) -> bool:
     return state in _oauth_states
 
 
-def _consume_oauth_state(state: str) -> None:
-    _oauth_states.pop(state, None)
+def _consume_oauth_state(state: str) -> dict:
+    return _oauth_states.pop(state, {})
 
 
 def _extract_token(request: Request) -> str | None:
@@ -170,11 +175,11 @@ async def refresh_models(request: Request):
 
 # OAuth endpoints
 @app.get("/auth/google/login")
-async def google_login():
+async def google_login(redirect_to: str | None = Query(None)):
     oauth_client = create_oauth_client("google")
     if not oauth_client:
         raise HTTPException(status_code=400, detail="Google OAuth not configured")
-    state = _generate_oauth_state()
+    state = _generate_oauth_state(redirect_to)
     redirect_url = oauth_client.get_authorization_url(state)
     return RedirectResponse(url=redirect_url)
 
@@ -184,13 +189,17 @@ async def google_login():
 async def google_callback(code: str, state: str, response: Response):
     if not _verify_oauth_state(state):
         raise HTTPException(status_code=400, detail="Invalid state parameter")
-    _consume_oauth_state(state)
+    state_data = _consume_oauth_state(state)
 
     oauth_client = create_oauth_client("google")
     if not oauth_client:
         raise HTTPException(status_code=400, detail="Google OAuth not configured")
 
-    frontend_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
+    # Use redirect_to from state if provided, else fall back to FRONTEND_BASE_URL
+    frontend_url = (
+        state_data.get("redirect_to")
+        or os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
+    ).rstrip("/")
 
     try:
         token_data = await oauth_client.exchange_code_for_token(code)
@@ -211,11 +220,11 @@ async def google_callback(code: str, state: str, response: Response):
 
 
 @app.get("/auth/github/login")
-async def github_login():
+async def github_login(redirect_to: str | None = Query(None)):
     oauth_client = create_oauth_client("github")
     if not oauth_client:
         raise HTTPException(status_code=400, detail="GitHub OAuth not configured")
-    state = _generate_oauth_state()
+    state = _generate_oauth_state(redirect_to)
     redirect_url = oauth_client.get_authorization_url(state)
     return RedirectResponse(url=redirect_url)
 
@@ -225,13 +234,17 @@ async def github_login():
 async def github_callback(code: str, state: str, response: Response):
     if not _verify_oauth_state(state):
         raise HTTPException(status_code=400, detail="Invalid state parameter")
-    _consume_oauth_state(state)
+    state_data = _consume_oauth_state(state)
 
     oauth_client = create_oauth_client("github")
     if not oauth_client:
         raise HTTPException(status_code=400, detail="GitHub OAuth not configured")
 
-    frontend_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
+    # Use redirect_to from state if provided, else fall back to FRONTEND_BASE_URL
+    frontend_url = (
+        state_data.get("redirect_to")
+        or os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
+    ).rstrip("/")
 
     try:
         token_data = await oauth_client.exchange_code_for_token(code)
@@ -374,6 +387,24 @@ async def update_session(session_id: str, payload: UpdateSessionRequest, request
 
     session = await db.update_session_title(session_id, payload.title)
     return session
+
+
+@app.post("/sessions/{session_id}/messages", response_model=SessionMessageResponse)
+async def add_message(session_id: str, payload: AddMessageRequest, request: Request):
+    token = _extract_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token_data = jwt_manager.verify_token(token)
+    if not token_data:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    message = await db.add_session_message(
+        session_id=session_id,
+        role=payload.role,
+        content=payload.content,
+        meta=payload.meta,
+    )
+    return message
 
 
 @app.delete("/sessions/{session_id}")

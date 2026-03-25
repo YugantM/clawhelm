@@ -146,14 +146,14 @@ def create_oauth_client(provider: str) -> OAuthClient | None:
         # Support both Railway naming (GOOGLE_CLIENT_ID) and explicit naming
         client_id = os.getenv("GOOGLE_CLIENT_ID") or os.getenv("GOOGLE_OAUTH_CLIENT_ID")
         client_secret = os.getenv("GOOGLE_CLIENT_SECRET") or os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
-        redirect_uri = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
+        redirect_uri = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/auth/oauth/google/callback")
         if client_id and client_secret:
             return GoogleOAuthClient(provider, client_id, client_secret, redirect_uri)
     elif provider == "github":
         # Support both Railway naming (GITHUB_CLIENT_ID) and explicit naming
         client_id = os.getenv("GITHUB_CLIENT_ID") or os.getenv("GITHUB_OAUTH_CLIENT_ID")
         client_secret = os.getenv("GITHUB_CLIENT_SECRET") or os.getenv("GITHUB_OAUTH_CLIENT_SECRET")
-        redirect_uri = os.getenv("GITHUB_OAUTH_REDIRECT_URI", "http://localhost:8000/auth/github/callback")
+        redirect_uri = os.getenv("GITHUB_OAUTH_REDIRECT_URI", "http://localhost:8000/auth/oauth/github/callback")
         if client_id and client_secret:
             return GitHubOAuthClient(provider, client_id, client_secret, redirect_uri)
     return None

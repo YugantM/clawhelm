@@ -127,3 +127,9 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class AddMessageRequest(BaseModel):
+    role: str
+    content: str
+    meta: dict[str, Any] | None = None

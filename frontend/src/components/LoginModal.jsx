@@ -27,11 +27,13 @@ export default function LoginModal({ isOpen, onLoginSuccess, onSkip, authError }
   if (!isOpen) return null;
 
   function handleGoogleLogin() {
-    window.location.href = `${API_BASE}/auth/google/login`;
+    const redirectTo = encodeURIComponent(window.location.origin + window.location.pathname);
+    window.location.href = `${API_BASE}/auth/google/login?redirect_to=${redirectTo}`;
   }
 
   function handleGitHubLogin() {
-    window.location.href = `${API_BASE}/auth/github/login`;
+    const redirectTo = encodeURIComponent(window.location.origin + window.location.pathname);
+    window.location.href = `${API_BASE}/auth/github/login?redirect_to=${redirectTo}`;
   }
 
   async function handleEmailSubmit(e) {

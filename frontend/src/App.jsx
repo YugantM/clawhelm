@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  addSessionMessage,
+  createSession,
+  deleteSession,
   getCurrentUser,
   getHealth,
   getProviderConfig,
+  getSession,
+  getSessions,
+  logout as apiLogout,
   postChat,
   setAuthToken,
   updateOpenRouterApiKey,
 } from "./api";
 import Chat from "./components/Chat";
 import LoginModal from "./components/LoginModal";
+import Sidebar from "./components/Sidebar";
 import Settings from "./pages/Settings";
 
 const HEALTH_POLL_MS = 10000;
@@ -72,6 +79,13 @@ export default function App() {
   const [authCheckDone, setAuthCheckDone] = useState(false);
   const [hasOfflineKey, setHasOfflineKey] = useState(false);
   const [authError, setAuthError] = useState("");
+
+  // Sidebar & session state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sessions, setSessions] = useState([]);
+  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+
   const pendingRef = useRef(false);
   const messagesRef = useRef([]);
 
@@ -126,6 +140,28 @@ export default function App() {
     }
   }, []);
 
+  // Load sessions when user logs in
+  useEffect(() => {
+    if (!currentUser) {
+      setSessions([]);
+      setActiveSessionId(null);
+      return;
+    }
+    loadSessions();
+  }, [currentUser]);
+
+  async function loadSessions() {
+    try {
+      setLoadingSessions(true);
+      const list = await getSessions();
+      setSessions(list);
+    } catch (err) {
+      console.log("Failed to load sessions:", err);
+    } finally {
+      setLoadingSessions(false);
+    }
+  }
+
   // Poll health to know if backend is up
   useEffect(() => {
     let active = true;
@@ -153,6 +189,25 @@ export default function App() {
     setPendingChat(true);
     setChatError("");
 
+    // Auto-create session for logged-in users on first message
+    let sessionId = activeSessionId;
+    if (currentUser && !sessionId) {
+      try {
+        const title = prompt.length > 60 ? prompt.slice(0, 57) + "..." : prompt;
+        const session = await createSession(title);
+        sessionId = session.id;
+        setActiveSessionId(sessionId);
+        setSessions((prev) => [session, ...prev]);
+      } catch (err) {
+        console.log("Failed to create session:", err);
+      }
+    }
+
+    // Save user message to session
+    if (currentUser && sessionId) {
+      addSessionMessage(sessionId, "user", prompt).catch(() => {});
+    }
+
     try {
       const response = await postChat(
         next.map((m) => ({ role: m.role, content: m.content })),
@@ -160,6 +215,11 @@ export default function App() {
       const content = normalizeAssistantContent(response);
       const meta = extractMeta(response);
       setMessages((cur) => [...cur, createMessage(assistantId, "assistant", content, meta)]);
+
+      // Save assistant message to session
+      if (currentUser && sessionId) {
+        addSessionMessage(sessionId, "assistant", content, meta).catch(() => {});
+      }
     } catch (err) {
       const payload = err?.payload || null;
       const content = normalizeAssistantContent(payload || { error: { message: err.message || "Request failed" } });
@@ -174,7 +234,61 @@ export default function App() {
 
   function handleNewChat() {
     setMessages([]);
+    setActiveSessionId(null);
     setChatError("");
+    setSidebarOpen(false);
+  }
+
+  async function handleSelectSession(sessionId) {
+    setSidebarOpen(false);
+    if (sessionId === activeSessionId) return;
+    setActiveSessionId(sessionId);
+    setMessages([]);
+    setChatError("");
+    try {
+      const data = await getSession(sessionId);
+      if (data.messages && data.messages.length > 0) {
+        const restored = data.messages.map((m) => {
+          let meta = null;
+          if (m.meta) {
+            try { meta = typeof m.meta === "string" ? JSON.parse(m.meta) : m.meta; } catch {}
+          }
+          return createMessage(
+            `restored-${m.id}`,
+            m.role,
+            m.content,
+            meta,
+          );
+        });
+        setMessages(restored);
+      }
+    } catch (err) {
+      console.log("Failed to load session:", err);
+    }
+  }
+
+  async function handleDeleteSession(sessionId) {
+    try {
+      await deleteSession(sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+        setMessages([]);
+      }
+    } catch (err) {
+      console.log("Failed to delete session:", err);
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await apiLogout();
+    } catch {}
+    setCurrentUser(null);
+    setMessages([]);
+    setActiveSessionId(null);
+    setSessions([]);
+    setSidebarOpen(false);
   }
 
   async function handleSaveOpenrouterKey() {
@@ -214,14 +328,35 @@ export default function App() {
   function handleLoginSuccess(user) {
     if (user) setCurrentUser(user);
     setShowLoginModal(false);
+    setAuthError("");
   }
 
   return (
     <div className="app-shell">
+      <Sidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelectSession={handleSelectSession}
+        onNewChat={handleNewChat}
+        onDeleteSession={handleDeleteSession}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        onSignIn={() => { setSidebarOpen(false); setShowLoginModal(true); }}
+      />
+
       <header className="app-header">
-        <div className="app-header__brand">
-          <img className="app-header__icon" src={iconSrc} alt="" aria-hidden="true" />
-          <strong className="app-header__name">ClawHelm</strong>
+        <div className="app-header__left">
+          <button type="button" className="icon-button sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar" title="Chat history">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </button>
+          <div className="app-header__brand">
+            <img className="app-header__icon" src={iconSrc} alt="" aria-hidden="true" />
+            <strong className="app-header__name">ClawHelm</strong>
+          </div>
         </div>
 
         <button type="button" className="new-chat-button" onClick={handleNewChat}>
@@ -229,7 +364,17 @@ export default function App() {
         </button>
 
         <div className="app-header__actions">
-          {!currentUser && (
+          {currentUser ? (
+            <div className="header-user">
+              {currentUser.avatar_url ? (
+                <img className="header-user__avatar" src={currentUser.avatar_url} alt="" />
+              ) : (
+                <div className="header-user__avatar header-user__avatar--placeholder">
+                  {(currentUser.name || currentUser.email || "?")[0].toUpperCase()}
+                </div>
+              )}
+            </div>
+          ) : (
             <button type="button" className="header-signin-btn" onClick={() => setShowLoginModal(true)}>
               Sign in
             </button>
@@ -248,6 +393,7 @@ export default function App() {
           messages={messages}
           pending={pendingChat}
           onSend={handleSend}
+          currentUser={currentUser}
         />
       </main>
 

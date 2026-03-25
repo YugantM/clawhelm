@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Message from "./Message";
 
-export default function Chat({ messages, pending, onSend }) {
+export default function Chat({ messages, pending, onSend, currentUser }) {
   const [input, setInput] = useState("");
   const threadRef = useRef(null);
   const submitLockRef = useRef(false);
@@ -29,7 +29,16 @@ export default function Chat({ messages, pending, onSend }) {
         {messages.length === 0 ? (
           <div className="chat__empty">
             <h1 className="chat__empty-title">ClawHelm</h1>
-            <p className="chat__empty-sub">Ask anything. The best model answers.</p>
+            <p className="chat__empty-sub">
+              {currentUser
+                ? `Welcome back${currentUser.name ? `, ${currentUser.name}` : ""}. Ask anything.`
+                : "Ask anything. The best model answers."}
+            </p>
+            {!currentUser && (
+              <p className="chat__empty-guest-hint">
+                Sign in to save your chat history across devices
+              </p>
+            )}
             <div className="chat__suggestions">
               <button type="button" onClick={() => { setInput("Explain quantum computing in simple terms"); }}>
                 Explain quantum computing
