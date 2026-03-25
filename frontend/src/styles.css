@@ -13,7 +13,9 @@
   --text-secondary: #94a3b8;
   --text-tertiary: #64748b;
   --accent: #22d3ee;
+  --accent-mid: #f59e0b;
   --accent-warm: #f97316;
+  --brand-gradient: linear-gradient(135deg, var(--accent), var(--accent-mid), var(--accent-warm));
   --danger: #f87171;
   --radius: 16px;
   --radius-sm: 10px;
@@ -74,12 +76,31 @@ button, textarea, input, select { font: inherit; }
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: -0.01em;
+  background: var(--brand-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .app-header__actions {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.header-signin-btn {
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 5px 14px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.header-signin-btn:hover {
+  background: rgba(34, 211, 238, 0.1);
 }
 
 .new-chat-button {
@@ -166,7 +187,7 @@ button, textarea, input, select { font: inherit; }
   font-size: 2.4rem;
   font-weight: 800;
   letter-spacing: -0.03em;
-  background: linear-gradient(135deg, var(--accent), var(--accent-warm));
+  background: var(--brand-gradient);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -318,7 +339,7 @@ button, textarea, input, select { font: inherit; }
   height: 42px;
   border: none;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent), var(--accent-warm));
+  background: var(--brand-gradient);
   color: #020617;
   cursor: pointer;
   flex-shrink: 0;
@@ -446,7 +467,7 @@ button, textarea, input, select { font: inherit; }
   border: none;
   border-radius: 999px;
   padding: 8px 16px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-warm));
+  background: var(--brand-gradient);
   color: #020617;
   font-weight: 600;
   font-size: 0.82rem;
@@ -505,7 +526,7 @@ button, textarea, input, select { font: inherit; }
 .login-modal__brand {
   font-size: 1.5rem;
   font-weight: 800;
-  background: linear-gradient(135deg, var(--accent), var(--accent-warm));
+  background: var(--brand-gradient);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -612,6 +633,24 @@ button, textarea, input, select { font: inherit; }
   font-size: inherit;
   padding: 0;
   text-decoration: underline;
+}
+
+.login-skip {
+  text-align: center;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.login-skip button {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 0.82rem;
+  padding: 0;
+}
+.login-skip button:hover {
+  color: var(--text-secondary);
 }
 
 /* ---- Responsive ---- */

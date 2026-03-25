@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  getAuthProviders,
   getCurrentUser,
   getHealth,
-  getLogs,
   getProviderConfig,
-  getStats,
   postChat,
-  resolveModelAlias,
+  setAuthToken,
   updateOpenRouterApiKey,
 } from "./api";
 import Chat from "./components/Chat";
@@ -74,6 +71,7 @@ export default function App() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [authCheckDone, setAuthCheckDone] = useState(false);
   const [hasOfflineKey, setHasOfflineKey] = useState(false);
+  const [authError, setAuthError] = useState("");
   const pendingRef = useRef(false);
   const messagesRef = useRef([]);
 
@@ -113,16 +111,17 @@ export default function App() {
   // Check for auth query params (OAuth callback)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.has("auth_success")) {
+    const token = params.get("auth_token");
+    if (token) {
+      setAuthToken(token);
       window.history.replaceState({}, document.title, window.location.pathname);
       setShowLoginModal(false);
-      // Refresh user data
       getCurrentUser().then((user) => {
         if (user) setCurrentUser(user);
       });
     } else if (params.has("auth_error")) {
       const error = params.get("auth_error");
-      console.error("Auth error:", error);
+      setAuthError(error);
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
@@ -230,6 +229,11 @@ export default function App() {
         </button>
 
         <div className="app-header__actions">
+          {!currentUser && (
+            <button type="button" className="header-signin-btn" onClick={() => setShowLoginModal(true)}>
+              Sign in
+            </button>
+          )}
           <span className={`status-dot ${backendUp ? "status-dot--live" : "status-dot--off"}`} title={backendUp ? "Connected" : "Offline"} />
           <button type="button" className="icon-button" onClick={() => setShowSettings(true)} aria-label="Settings" title="Settings">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 13a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="1.5"/><path d="M16.47 12.37l.89.52a1 1 0 01.36 1.36l-1 1.74a1 1 0 01-1.36.36l-.89-.52a7.06 7.06 0 01-1.5.87v1.04a1 1 0 01-1 1h-2a1 1 0 01-1-1V16.7a7.06 7.06 0 01-1.5-.87l-.89.52a1 1 0 01-1.36-.36l-1-1.74a1 1 0 01.36-1.36l.89-.52a7.1 7.1 0 010-1.74l-.89-.52a1 1 0 01-.36-1.36l1-1.74a1 1 0 011.36-.36l.89.52a7.06 7.06 0 011.5-.87V3.26a1 1 0 011-1h2a1 1 0 011 1V4.3a7.06 7.06 0 011.5.87l.89-.52a1 1 0 011.36.36l1 1.74a1 1 0 01-.36 1.36l-.89.52a7.1 7.1 0 010 1.74z" stroke="currentColor" strokeWidth="1.5"/></svg>
@@ -247,7 +251,12 @@ export default function App() {
         />
       </main>
 
-      <LoginModal isOpen={showLoginModal} onLoginSuccess={handleLoginSuccess} />
+      <LoginModal
+        isOpen={showLoginModal}
+        onLoginSuccess={handleLoginSuccess}
+        onSkip={() => setShowLoginModal(false)}
+        authError={authError}
+      />
 
       {showSettings ? (
         <div className="modal-overlay" onClick={() => setShowSettings(false)}>

@@ -1,12 +1,32 @@
 const API_BASE_URL = import.meta.env.DEV ? "" : (import.meta.env.VITE_API_BASE_URL || "");
 
+// Auth token management
+const TOKEN_KEY = "clawhelm_auth_token";
+
+export function setAuthToken(token) {
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+}
+
+export function getAuthToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
 export function resolveModelAlias(modelAlias = "auto") {
   if (modelAlias === "auto") return "clawhelm-auto";
   return modelAlias;
 }
 
-async function fetchJson(path, options) {
-  const response = await fetch(`${API_BASE_URL}${path}`, options);
+async function fetchJson(path, options = {}) {
+  const token = getAuthToken();
+  const headers = { ...(options.headers || {}) };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
   const text = await response.text();
   let payload;
   try {
@@ -77,19 +97,17 @@ export function getAuthProviders() {
 }
 
 export function getCurrentUser() {
-  return fetchJson("/auth/me", { credentials: "include" }).catch(() => null);
+  return fetchJson("/auth/me").catch(() => null);
 }
 
 export function logout() {
-  return fetchJson("/auth/logout", {
-    method: "POST",
-    credentials: "include",
-  });
+  setAuthToken(null);
+  return fetchJson("/auth/logout", { method: "POST" });
 }
 
 // Session endpoints
 export function getSessions() {
-  return fetchJson("/sessions", { credentials: "include" });
+  return fetchJson("/sessions");
 }
 
 export function createSession(title) {
@@ -97,17 +115,13 @@ export function createSession(title) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
-    credentials: "include",
   });
 }
 
 export function getSession(sessionId) {
-  return fetchJson(`/sessions/${sessionId}`, { credentials: "include" });
+  return fetchJson(`/sessions/${sessionId}`);
 }
 
 export function deleteSession(sessionId) {
-  return fetchJson(`/sessions/${sessionId}`, {
-    method: "DELETE",
-    credentials: "include",
-  });
+  return fetchJson(`/sessions/${sessionId}`, { method: "DELETE" });
 }

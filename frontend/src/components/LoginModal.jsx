@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
+import { setAuthToken } from "../api";
 
 const API_BASE = import.meta.env.DEV ? "" : (import.meta.env.VITE_API_BASE_URL || "");
 
-export default function LoginModal({ isOpen, onLoginSuccess }) {
+export default function LoginModal({ isOpen, onLoginSuccess, onSkip, authError }) {
   const [providers, setProviders] = useState({ google: false, github: false, email: true });
   const [mode, setMode] = useState("choose"); // choose | login | signup
   const [email, setEmail] = useState("");
@@ -18,6 +19,10 @@ export default function LoginModal({ isOpen, onLoginSuccess }) {
       .then(setProviders)
       .catch(() => {});
   }, [isOpen]);
+
+  useEffect(() => {
+    if (authError) setError(authError);
+  }, [authError]);
 
   if (!isOpen) return null;
 
@@ -42,11 +47,13 @@ export default function LoginModal({ isOpen, onLoginSuccess }) {
       const res = await fetch(`${API_BASE}${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Authentication failed");
+      if (data.access_token) {
+        setAuthToken(data.access_token);
+      }
       onLoginSuccess(data.user);
     } catch (err) {
       setError(err.message);
@@ -140,6 +147,10 @@ export default function LoginModal({ isOpen, onLoginSuccess }) {
           ) : (
             <>Already have an account? <button onClick={() => { setMode("login"); setError(""); }}>Sign in</button></>
           )}
+        </p>
+
+        <p className="login-skip">
+          <button onClick={onSkip}>Continue without signing in</button>
         </p>
       </div>
     </div>

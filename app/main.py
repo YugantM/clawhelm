@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Cookie, FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
@@ -86,6 +86,14 @@ def _verify_oauth_state(state: str) -> bool:
 
 def _consume_oauth_state(state: str) -> None:
     _oauth_states.pop(state, None)
+
+
+def _extract_token(request: Request) -> str | None:
+    """Extract JWT from Authorization header or cookie."""
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:]
+    return request.cookies.get("clawhelm_token")
 
 
 @app.post("/v1/chat/completions")
@@ -197,15 +205,7 @@ async def google_callback(code: str, state: str, response: Response):
         )
 
         access_token = jwt_manager.create_token(user["id"])
-        resp = RedirectResponse(url=f"{frontend_url}/?auth_success=true")
-        resp.set_cookie(
-            "clawhelm_token",
-            access_token,
-            max_age=30 * 24 * 3600,
-            httponly=True,
-            samesite="lax",
-        )
-        return resp
+        return RedirectResponse(url=f"{frontend_url}/?auth_token={access_token}")
     except Exception as e:
         return RedirectResponse(url=f"{frontend_url}/?auth_error={str(e)}")
 
@@ -246,22 +246,15 @@ async def github_callback(code: str, state: str, response: Response):
         )
 
         access_token = jwt_manager.create_token(user["id"])
-        resp = RedirectResponse(url=f"{frontend_url}/?auth_success=true")
-        resp.set_cookie(
-            "clawhelm_token",
-            access_token,
-            max_age=30 * 24 * 3600,
-            httponly=True,
-            samesite="lax",
-        )
-        return resp
+        return RedirectResponse(url=f"{frontend_url}/?auth_token={access_token}")
     except Exception as e:
         return RedirectResponse(url=f"{frontend_url}/?auth_error={str(e)}")
 
 
 # Auth endpoints
 @app.get("/auth/me", response_model=UserResponse | None)
-async def get_current_user_endpoint(token: str | None = Cookie(None)):
+async def get_current_user_endpoint(request: Request):
+    token = _extract_token(request)
     if not token:
         return None
     payload = jwt_manager.verify_token(token)
@@ -327,7 +320,8 @@ async def login(payload: LoginRequest, response: Response):
 
 # Session endpoints
 @app.get("/sessions", response_model=list[SessionResponse])
-async def list_sessions(token: str | None = Cookie(None)):
+async def list_sessions(request: Request):
+    token = _extract_token(request)
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     payload = jwt_manager.verify_token(token)
@@ -339,7 +333,8 @@ async def list_sessions(token: str | None = Cookie(None)):
 
 
 @app.post("/sessions", response_model=SessionResponse)
-async def create_session(payload: CreateSessionRequest, token: str | None = Cookie(None)):
+async def create_session(payload: CreateSessionRequest, request: Request):
+    token = _extract_token(request)
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     token_data = jwt_manager.verify_token(token)
@@ -356,7 +351,8 @@ async def create_session(payload: CreateSessionRequest, token: str | None = Cook
 
 
 @app.get("/sessions/{session_id}", response_model=dict)
-async def get_session(session_id: str, token: str | None = Cookie(None)):
+async def get_session(session_id: str, request: Request):
+    token = _extract_token(request)
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     token_data = jwt_manager.verify_token(token)
@@ -368,7 +364,8 @@ async def get_session(session_id: str, token: str | None = Cookie(None)):
 
 
 @app.put("/sessions/{session_id}", response_model=SessionResponse)
-async def update_session(session_id: str, payload: UpdateSessionRequest, token: str | None = Cookie(None)):
+async def update_session(session_id: str, payload: UpdateSessionRequest, request: Request):
+    token = _extract_token(request)
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     token_data = jwt_manager.verify_token(token)
@@ -380,7 +377,8 @@ async def update_session(session_id: str, payload: UpdateSessionRequest, token: 
 
 
 @app.delete("/sessions/{session_id}")
-async def delete_session(session_id: str, token: str | None = Cookie(None)):
+async def delete_session(session_id: str, request: Request):
+    token = _extract_token(request)
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     token_data = jwt_manager.verify_token(token)
