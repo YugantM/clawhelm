@@ -172,6 +172,7 @@ async def google_login():
 
 
 @app.get("/auth/google/callback")
+@app.get("/auth/oauth/google/callback")
 async def google_callback(code: str, state: str, response: Response):
     if not _verify_oauth_state(state):
         raise HTTPException(status_code=400, detail="Invalid state parameter")
@@ -220,6 +221,7 @@ async def github_login():
 
 
 @app.get("/auth/github/callback")
+@app.get("/auth/oauth/github/callback")
 async def github_callback(code: str, state: str, response: Response):
     if not _verify_oauth_state(state):
         raise HTTPException(status_code=400, detail="Invalid state parameter")
