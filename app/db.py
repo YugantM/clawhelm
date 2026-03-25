@@ -71,6 +71,7 @@ class Database:
             )
             self._ensure_column(connection, "users", "password_hash", "TEXT")
             self._ensure_column(connection, "users", "provider_user_id", "TEXT")
+            self._migrate_users_table(connection)
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -152,6 +153,37 @@ class Database:
             WHERE actual_model IS NULL OR model_display_name IS NULL
             """
         )
+
+    @staticmethod
+    def _migrate_users_table(connection: sqlite3.Connection) -> None:
+        # If provider_user_id is NOT NULL in old schema, recreate table with nullable constraint
+        cols = connection.execute("PRAGMA table_info(users)").fetchall()
+        pid_col = next((c for c in cols if c["name"] == "provider_user_id"), None)
+        if pid_col and pid_col["notnull"]:
+            connection.execute("ALTER TABLE users RENAME TO _users_old")
+            connection.execute(
+                """
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider_user_id TEXT,
+                    provider TEXT NOT NULL DEFAULT 'email',
+                    email TEXT NOT NULL UNIQUE,
+                    name TEXT,
+                    avatar_url TEXT,
+                    password_hash TEXT,
+                    created_at TEXT NOT NULL,
+                    last_login_at TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO users (id, provider_user_id, provider, email, name, avatar_url, created_at, last_login_at)
+                SELECT id, provider_user_id, provider, email, name, avatar_url, created_at, last_login_at
+                FROM _users_old
+                """
+            )
+            connection.execute("DROP TABLE _users_old")
 
     async def insert_log(
         self,
