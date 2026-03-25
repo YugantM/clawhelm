@@ -156,34 +156,41 @@ class Database:
 
     @staticmethod
     def _migrate_users_table(connection: sqlite3.Connection) -> None:
-        # If provider_user_id is NOT NULL in old schema, recreate table with nullable constraint
+        # Rebuild users table if it's missing required columns or has wrong constraints
+        required_cols = {"id", "provider_user_id", "provider", "email", "name", "avatar_url", "password_hash", "created_at", "last_login_at"}
         cols = connection.execute("PRAGMA table_info(users)").fetchall()
+        existing_col_names = {c["name"] for c in cols}
         pid_col = next((c for c in cols if c["name"] == "provider_user_id"), None)
-        if pid_col and pid_col["notnull"]:
-            connection.execute("ALTER TABLE users RENAME TO _users_old")
-            connection.execute(
-                """
-                CREATE TABLE users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    provider_user_id TEXT,
-                    provider TEXT NOT NULL DEFAULT 'email',
-                    email TEXT NOT NULL UNIQUE,
-                    name TEXT,
-                    avatar_url TEXT,
-                    password_hash TEXT,
-                    created_at TEXT NOT NULL,
-                    last_login_at TEXT
-                )
-                """
+        needs_rebuild = (
+            not required_cols.issubset(existing_col_names)
+            or (pid_col and pid_col["notnull"])
+        )
+        if not needs_rebuild:
+            return
+        # Preserve existing emails/names where possible
+        shared_cols = existing_col_names & required_cols - {"id"}
+        connection.execute("ALTER TABLE users RENAME TO _users_old")
+        connection.execute(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider_user_id TEXT,
+                provider TEXT NOT NULL DEFAULT 'email',
+                email TEXT NOT NULL UNIQUE,
+                name TEXT,
+                avatar_url TEXT,
+                password_hash TEXT,
+                created_at TEXT NOT NULL,
+                last_login_at TEXT
             )
+            """
+        )
+        if shared_cols:
+            col_list = ", ".join(shared_cols)
             connection.execute(
-                """
-                INSERT INTO users (id, provider_user_id, provider, email, name, avatar_url, created_at, last_login_at)
-                SELECT id, provider_user_id, provider, email, name, avatar_url, created_at, last_login_at
-                FROM _users_old
-                """
+                f"INSERT INTO users ({col_list}) SELECT {col_list} FROM _users_old"
             )
-            connection.execute("DROP TABLE _users_old")
+        connection.execute("DROP TABLE _users_old")
 
     async def insert_log(
         self,
