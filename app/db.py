@@ -446,7 +446,9 @@ class Database:
         name: str | None,
         avatar_url: str | None,
     ) -> dict:
+        now = datetime.now(timezone.utc).isoformat()
         with self._connect() as connection:
+            # Step 1: exact match by provider + provider_user_id
             cursor = connection.execute(
                 "SELECT * FROM users WHERE provider = ? AND provider_user_id = ?",
                 (provider, provider_user_id),
@@ -455,29 +457,35 @@ class Database:
             if user:
                 connection.execute(
                     "UPDATE users SET last_login_at = ? WHERE id = ?",
-                    (datetime.now(timezone.utc).isoformat(), user["id"]),
+                    (now, user["id"]),
                 )
                 connection.commit()
                 return dict(user)
 
+            # Step 2: email match — link existing account regardless of provider
+            cursor = connection.execute(
+                "SELECT * FROM users WHERE email = ?",
+                (email,),
+            )
+            user = cursor.fetchone()
+            if user:
+                connection.execute(
+                    "UPDATE users SET last_login_at = ? WHERE id = ?",
+                    (now, user["id"]),
+                )
+                connection.commit()
+                return dict(user)
+
+            # Step 3: brand new user
             cursor = connection.execute(
                 """
                 INSERT INTO users (provider, provider_user_id, email, name, avatar_url, created_at, last_login_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    provider,
-                    provider_user_id,
-                    email,
-                    name,
-                    avatar_url,
-                    datetime.now(timezone.utc).isoformat(),
-                    datetime.now(timezone.utc).isoformat(),
-                ),
+                (provider, provider_user_id, email, name, avatar_url, now, now),
             )
             connection.commit()
-            user_id = cursor.lastrowid
-            cursor = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            cursor = connection.execute("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,))
             return dict(cursor.fetchone())
 
     async def get_user_by_email(self, email: str) -> dict | None:
