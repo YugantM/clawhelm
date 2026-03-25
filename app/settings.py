@@ -59,15 +59,12 @@ class SettingsStore:
             env_name = "OPENROUTER_API_KEY" if provider_name == "openrouter" else "PROVIDER_API_KEY"
             env_value = os.getenv(env_name, "").strip()
             stored_value = str(providers.get(provider_name, {}).get("api_key", "")).strip()
-            source = "env" if env_value else "settings" if stored_value else "missing"
             active_value = env_value or stored_value or ""
             result[provider_name] = {
                 "configured": bool(active_value),
-                "source": source,
-                "masked_key": _mask_api_key(active_value),
+                "source": "configured" if active_value else "missing",
             }
         return {
-            "settings_path": str(self.path),
             "providers": result,
         }
 

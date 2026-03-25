@@ -1,70 +1,64 @@
-import ProviderConfigPanel from "../components/ProviderConfigPanel";
+export default function Settings({ health, currentUser }) {
+  const backendUp = health?.status === "ok";
 
-function RuntimeInfoCard({ health, providerConfig }) {
-  const openrouter = providerConfig?.providers?.openrouter;
-  const openai = providerConfig?.providers?.openai;
-
-  return (
-    <section className="settings-grid">
-      <div className="settings-card panel">
-        <h2>Runtime</h2>
-        <div className="settings-list">
-          <div className="settings-list__row">
-            <span>Database</span>
-            <strong>{health?.db_path || "unknown"}</strong>
-          </div>
-          <div className="settings-list__row">
-            <span>Settings file</span>
-            <strong>{health?.settings_path || providerConfig?.settings_path || "unknown"}</strong>
-          </div>
-        </div>
-      </div>
-
-      <div className="settings-card panel">
-        <h2>Provider Status</h2>
-        <div className="settings-list">
-          <div className="settings-list__row">
-            <span>OpenRouter key</span>
-            <strong>{openrouter?.configured ? `${openrouter.source} · ${openrouter.masked_key || "configured"}` : "missing"}</strong>
-          </div>
-          <div className="settings-list__row">
-            <span>OpenAI key</span>
-            <strong>{openai?.configured ? `${openai.source} · ${openai.masked_key || "configured"}` : "missing"}</strong>
-          </div>
-          <div className="settings-list__row">
-            <span>OpenRouter routing</span>
-            <strong>{health?.allow_openrouter_routing ? "enabled" : "disabled"}</strong>
-          </div>
-          <div className="settings-list__row">
-            <span>OpenAI routing</span>
-            <strong>{health?.allow_openai_routing ? "enabled" : "disabled"}</strong>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-export default function Settings({
-  health,
-  providerConfig,
-  openrouterDraft,
-  onOpenrouterDraftChange,
-  onSaveOpenrouterKey,
-  onClearOpenrouterKey,
-  savingProviderConfig,
-}) {
   return (
     <div className="page-stack">
-      <ProviderConfigPanel
-        providerConfig={providerConfig}
-        openrouterDraft={openrouterDraft}
-        onDraftChange={onOpenrouterDraftChange}
-        onSave={onSaveOpenrouterKey}
-        onClear={onClearOpenrouterKey}
-        saving={savingProviderConfig}
-      />
-      <RuntimeInfoCard health={health} providerConfig={providerConfig} />
+      <section className="panel">
+        <h2>Connection</h2>
+        <div className="settings-list">
+          <div className="settings-list__row">
+            <span>Backend</span>
+            <strong className={backendUp ? "status-text--ok" : "status-text--off"}>
+              {backendUp ? "Connected" : "Offline"}
+            </strong>
+          </div>
+          <div className="settings-list__row">
+            <span>AI routing</span>
+            <strong>{health?.allow_openrouter_routing ? "Enabled" : "Disabled"}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>Account</h2>
+        <div className="settings-list">
+          {currentUser ? (
+            <>
+              <div className="settings-list__row">
+                <span>Name</span>
+                <strong>{currentUser.name || "—"}</strong>
+              </div>
+              <div className="settings-list__row">
+                <span>Email</span>
+                <strong>{currentUser.email}</strong>
+              </div>
+              <div className="settings-list__row">
+                <span>Sign-in method</span>
+                <strong>{currentUser.provider === "email" ? "Email" : currentUser.provider === "google" ? "Google" : currentUser.provider === "github" ? "GitHub" : currentUser.provider}</strong>
+              </div>
+            </>
+          ) : (
+            <div className="settings-list__row">
+              <span>Status</span>
+              <strong>Guest mode</strong>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>About</h2>
+        <div className="settings-list">
+          <div className="settings-list__row">
+            <span>Version</span>
+            <strong>0.1.0</strong>
+          </div>
+          <div className="settings-list__row">
+            <span>Models</span>
+            <strong>Auto-selected via OpenRouter</strong>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

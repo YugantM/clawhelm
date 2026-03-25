@@ -61,17 +61,6 @@ export function getProviderConfig() {
   return fetchJson("/config/providers");
 }
 
-export function updateOpenRouterApiKey(apiKey) {
-  return fetchJson("/config/providers/openrouter", {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      "X-ClawHelm-Client": "dashboard",
-    },
-    body: JSON.stringify({ api_key: apiKey }),
-  });
-}
-
 export function postChat(messages, requestOptions) {
   const modelAlias = requestOptions?.model || "auto";
   return fetchJson("/v1/chat/completions", {
@@ -120,6 +109,14 @@ export function createSession(title) {
 
 export function getSession(sessionId) {
   return fetchJson(`/sessions/${sessionId}`);
+}
+
+export function updateSessionTitle(sessionId, title) {
+  return fetchJson(`/sessions/${sessionId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
 }
 
 export function deleteSession(sessionId) {

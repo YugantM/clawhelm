@@ -1,17 +1,16 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   addSessionMessage,
   createSession,
   deleteSession,
   getCurrentUser,
   getHealth,
-  getProviderConfig,
   getSession,
   getSessions,
   logout as apiLogout,
   postChat,
   setAuthToken,
-  updateOpenRouterApiKey,
+  updateSessionTitle,
 } from "./api";
 import Chat from "./components/Chat";
 import LoginModal from "./components/LoginModal";
@@ -82,10 +81,6 @@ export default function App() {
   const [pendingChat, setPendingChat] = useState(false);
   const [chatError, setChatError] = useState("");
   const [health, setHealth] = useState(null);
-  const [providerConfig, setProviderConfig] = useState(null);
-  const [openrouterDraft, setOpenrouterDraft] = useState("");
-  const [savingProviderConfig, setSavingProviderConfig] = useState(false);
-  const [settingsError, setSettingsError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -236,16 +231,32 @@ export default function App() {
     let active = true;
     async function check() {
       try {
-        const [h, p] = await Promise.all([getHealth(), getProviderConfig()]);
+        const h = await getHealth();
         if (!active) return;
         setHealth(h);
-        setProviderConfig(p);
       } catch { /* backend down — non-fatal */ }
     }
     check();
     const id = setInterval(() => check().catch(() => {}), HEALTH_POLL_MS);
     return () => { active = false; clearInterval(id); };
   }, []);
+
+  async function generateAndSetTitle(sessionId, userMessage, assistantMessage) {
+    try {
+      const titleResponse = await postChat([
+        { role: "user", content: userMessage },
+        { role: "assistant", content: assistantMessage },
+        { role: "user", content: "Generate a short title (3-5 words max) summarizing this conversation. Reply with ONLY the title text, no quotes, no punctuation." },
+      ]);
+      let title = normalizeAssistantContent(titleResponse).trim().replace(/^["']+|["']+$/g, "");
+      if (title && title.length < 80 && title !== "No response received.") {
+        await updateSessionTitle(sessionId, title);
+        setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title } : s)));
+      }
+    } catch (err) {
+      console.error("Failed to generate session title:", err);
+    }
+  }
 
   async function handleSend(prompt) {
     if (pendingRef.current) return;
@@ -260,7 +271,8 @@ export default function App() {
 
     // Auto-create session for logged-in users on first message
     let sessionId = activeSessionId;
-    if (currentUser && !sessionId) {
+    const isNewSession = currentUser && !sessionId;
+    if (isNewSession) {
       try {
         const title = prompt.length > 60 ? prompt.slice(0, 57) + "..." : prompt;
         const session = await createSession(title);
@@ -295,6 +307,10 @@ export default function App() {
           await addSessionMessage(sessionId, "assistant", content, meta);
         } catch (err) {
           console.error("Failed to save assistant message:", err);
+        }
+        // Auto-generate title for new sessions
+        if (isNewSession) {
+          generateAndSetTitle(sessionId, prompt, content);
         }
       }
     } catch (err) {
@@ -354,38 +370,6 @@ export default function App() {
     setSidebarOpen(false);
   }
 
-  async function handleSaveOpenrouterKey() {
-    setSavingProviderConfig(true);
-    setSettingsError("");
-    try {
-      const nextConfig = await updateOpenRouterApiKey(openrouterDraft);
-      const h = await getHealth();
-      setProviderConfig(nextConfig);
-      setHealth(h);
-      setOpenrouterDraft("");
-    } catch (err) {
-      setSettingsError(err?.payload?.error?.message || err.message || "Failed to save key");
-    } finally {
-      setSavingProviderConfig(false);
-    }
-  }
-
-  async function handleClearOpenrouterKey() {
-    setSavingProviderConfig(true);
-    setSettingsError("");
-    try {
-      const nextConfig = await updateOpenRouterApiKey("");
-      const h = await getHealth();
-      setProviderConfig(nextConfig);
-      setHealth(h);
-      setOpenrouterDraft("");
-    } catch (err) {
-      setSettingsError(err?.payload?.error?.message || err.message || "Failed to clear key");
-    } finally {
-      setSavingProviderConfig(false);
-    }
-  }
-
   const backendUp = health?.status === "ok";
 
   function handleLoginSuccess(user) {
@@ -443,7 +427,12 @@ export default function App() {
           )}
           <span className={`status-dot ${backendUp ? "status-dot--live" : "status-dot--off"}`} title={backendUp ? "Connected" : "Offline"} />
           <button type="button" className="icon-button" onClick={() => setShowSettings(true)} aria-label="Settings" title="Settings">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 13a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="1.5"/><path d="M16.47 12.37l.89.52a1 1 0 01.36 1.36l-1 1.74a1 1 0 01-1.36.36l-.89-.52a7.06 7.06 0 01-1.5.87v1.04a1 1 0 01-1 1h-2a1 1 0 01-1-1V16.7a7.06 7.06 0 01-1.5-.87l-.89.52a1 1 0 01-1.36-.36l-1-1.74a1 1 0 01.36-1.36l.89-.52a7.1 7.1 0 010-1.74l-.89-.52a1 1 0 01-.36-1.36l1-1.74a1 1 0 011.36-.36l.89.52a7.06 7.06 0 011.5-.87V3.26a1 1 0 011-1h2a1 1 0 011 1V4.3a7.06 7.06 0 011.5.87l.89-.52a1 1 0 011.36.36l1 1.74a1 1 0 01-.36 1.36l-.89.52a7.1 7.1 0 010 1.74z" stroke="currentColor" strokeWidth="1.5"/></svg>
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M3 5h4m6 0h4M3 10h10m4 0h0M3 15h2m6 0h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <circle cx="10" cy="5" r="1.5" stroke="currentColor" strokeWidth="1.5"/>
+              <circle cx="16" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.5"/>
+              <circle cx="8" cy="15" r="1.5" stroke="currentColor" strokeWidth="1.5"/>
+            </svg>
           </button>
         </div>
       </header>
@@ -476,16 +465,7 @@ export default function App() {
               </button>
             </div>
             <div className="modal-card__body">
-              <Settings
-                health={health}
-                providerConfig={providerConfig}
-                openrouterDraft={openrouterDraft}
-                onOpenrouterDraftChange={setOpenrouterDraft}
-                onSaveOpenrouterKey={handleSaveOpenrouterKey}
-                onClearOpenrouterKey={handleClearOpenrouterKey}
-                savingProviderConfig={savingProviderConfig}
-              />
-              {settingsError ? <p className="settings-error">{settingsError}</p> : null}
+              <Settings health={health} currentUser={currentUser} />
             </div>
           </div>
         </div>

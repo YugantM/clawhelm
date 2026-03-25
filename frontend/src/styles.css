@@ -780,6 +780,8 @@ button, textarea, input, select { font: inherit; }
 .settings-list__row { display: flex; justify-content: space-between; gap: 12px; font-size: 0.78rem; }
 .settings-list__row span { color: var(--text-tertiary); }
 .settings-list__row strong { color: var(--text-secondary); text-align: right; font-weight: 500; word-break: break-all; }
+.status-text--ok { color: #34d399; }
+.status-text--off { color: var(--danger); }
 
 /* ---- Login Modal ---- */
 

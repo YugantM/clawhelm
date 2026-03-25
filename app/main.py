@@ -24,8 +24,6 @@ from .models import (
     CreateSessionRequest,
     LogEntry,
     LoginRequest,
-    ProviderApiKeyUpdate,
-    ProviderConfigResponse,
     SessionChatRequest,
     SessionMessageResponse,
     SessionResponse,
@@ -151,20 +149,6 @@ async def get_stats():
     return await db.get_stats()
 
 
-@app.get("/config/providers", response_model=ProviderConfigResponse)
-async def get_provider_config():
-    return await settings_store.get_provider_view()
-
-
-@app.put("/config/providers/openrouter", response_model=ProviderConfigResponse)
-async def update_openrouter_provider_config(payload: ProviderApiKeyUpdate, request: Request):
-    result = await settings_store.set_provider_api_key("openrouter", payload.api_key)
-    client: httpx.AsyncClient = request.app.state.http_client
-    try:
-        await model_registry.refresh(client)
-    except httpx.HTTPError:
-        pass
-    return result
 
 
 @app.get("/refresh-models")
@@ -422,15 +406,8 @@ async def delete_session(session_id: str, request: Request):
 
 @app.get("/health")
 async def health():
-    provider_config = await settings_store.get_provider_view()
     return {
         "status": "ok",
         "service": "clawhelm",
-        "provider_base_url": os.getenv("PROVIDER_BASE_URL", "https://api.openai.com"),
-        "openrouter_enabled": os.getenv("ENABLE_OPENROUTER", "false").lower() == "true",
-        "allow_openai_routing": os.getenv("ALLOW_OPENAI_ROUTING", "true").lower() == "true",
         "allow_openrouter_routing": os.getenv("ALLOW_OPENROUTER_ROUTING", "true").lower() == "true",
-        "db_path": str(db.db_path),
-        "settings_path": provider_config["settings_path"],
-        "openrouter_key_configured": provider_config["providers"]["openrouter"]["configured"],
     }
