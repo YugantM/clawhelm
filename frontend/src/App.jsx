@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   addSessionMessage,
   createSession,
@@ -19,6 +19,8 @@ import Sidebar from "./components/Sidebar";
 import Settings from "./pages/Settings";
 
 const HEALTH_POLL_MS = 10000;
+const SESSION_POLL_MS = 15000;
+const SESSION_KEY = "clawhelm_active_session";
 
 function createMessageId(prefix) {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -63,6 +65,17 @@ function extractMeta(response) {
   };
 }
 
+function restoreMessages(data) {
+  if (!data?.messages?.length) return [];
+  return data.messages.map((m) => {
+    let meta = null;
+    if (m.meta) {
+      try { meta = typeof m.meta === "string" ? JSON.parse(m.meta) : m.meta; } catch {}
+    }
+    return createMessage(`restored-${m.id}`, m.role, m.content, meta);
+  });
+}
+
 export default function App() {
   const iconSrc = `${import.meta.env.BASE_URL}clawhelm-icon.svg`;
   const [messages, setMessages] = useState([]);
@@ -80,16 +93,29 @@ export default function App() {
   const [hasOfflineKey, setHasOfflineKey] = useState(false);
   const [authError, setAuthError] = useState("");
 
-  // Sidebar & session state
+  // Sidebar & session state — restore activeSessionId from localStorage
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
-  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [activeSessionId, setActiveSessionId] = useState(() => {
+    try { return localStorage.getItem(SESSION_KEY) || null; } catch { return null; }
+  });
   const [loadingSessions, setLoadingSessions] = useState(false);
 
   const pendingRef = useRef(false);
   const messagesRef = useRef([]);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // Persist activeSessionId to localStorage
+  useEffect(() => {
+    try {
+      if (activeSessionId) {
+        localStorage.setItem(SESSION_KEY, activeSessionId);
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+      }
+    } catch {}
+  }, [activeSessionId]);
 
   // Check authentication on mount — handles both OAuth callback and normal load
   useEffect(() => {
@@ -135,27 +161,75 @@ export default function App() {
     return () => { active = false; };
   }, []);
 
-  // Load sessions when user logs in
+  // Load sessions when user logs in, and restore active session
   useEffect(() => {
     if (!currentUser) {
       setSessions([]);
-      setActiveSessionId(null);
       return;
     }
-    loadSessions();
+
+    let active = true;
+    async function loadAndRestore() {
+      try {
+        setLoadingSessions(true);
+        const list = await getSessions();
+        if (!active) return;
+        setSessions(list);
+
+        // Restore the active session's messages if we have one saved
+        const savedId = activeSessionId;
+        if (savedId) {
+          const exists = list.some((s) => s.id === savedId);
+          if (exists) {
+            try {
+              const data = await getSession(savedId);
+              if (active) {
+                const restored = restoreMessages(data);
+                if (restored.length > 0) {
+                  setMessages(restored);
+                }
+              }
+            } catch (err) {
+              console.error("Failed to restore session:", err);
+              if (active) setActiveSessionId(null);
+            }
+          } else {
+            // Session no longer exists
+            if (active) setActiveSessionId(null);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load sessions:", err);
+      } finally {
+        if (active) setLoadingSessions(false);
+      }
+    }
+
+    loadAndRestore();
+    return () => { active = false; };
   }, [currentUser]);
 
-  async function loadSessions() {
+  // Refresh sessions list periodically and when sidebar opens
+  const refreshSessions = useCallback(async () => {
+    if (!currentUser) return;
     try {
-      setLoadingSessions(true);
       const list = await getSessions();
       setSessions(list);
-    } catch (err) {
-      console.log("Failed to load sessions:", err);
-    } finally {
-      setLoadingSessions(false);
+    } catch {}
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const id = setInterval(refreshSessions, SESSION_POLL_MS);
+    return () => clearInterval(id);
+  }, [currentUser, refreshSessions]);
+
+  // Also refresh when sidebar opens
+  useEffect(() => {
+    if (sidebarOpen && currentUser) {
+      refreshSessions();
     }
-  }
+  }, [sidebarOpen, currentUser, refreshSessions]);
 
   // Poll health to know if backend is up
   useEffect(() => {
@@ -250,23 +324,9 @@ export default function App() {
     setChatError("");
     try {
       const data = await getSession(sessionId);
-      if (data.messages && data.messages.length > 0) {
-        const restored = data.messages.map((m) => {
-          let meta = null;
-          if (m.meta) {
-            try { meta = typeof m.meta === "string" ? JSON.parse(m.meta) : m.meta; } catch {}
-          }
-          return createMessage(
-            `restored-${m.id}`,
-            m.role,
-            m.content,
-            meta,
-          );
-        });
-        setMessages(restored);
-      }
+      setMessages(restoreMessages(data));
     } catch (err) {
-      console.log("Failed to load session:", err);
+      console.error("Failed to load session:", err);
     }
   }
 
@@ -279,7 +339,7 @@ export default function App() {
         setMessages([]);
       }
     } catch (err) {
-      console.log("Failed to delete session:", err);
+      console.error("Failed to delete session:", err);
     }
   }
 
