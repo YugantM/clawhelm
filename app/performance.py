@@ -31,8 +31,8 @@ def get_model_stats(model_id: str) -> dict[str, float | int]:
             SELECT
                 COUNT(*) AS total_count,
                 SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END) AS success_count,
-                AVG(latency) AS avg_latency,
-                AVG(estimated_cost) AS avg_cost
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN latency END) AS avg_latency,
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN estimated_cost END) AS avg_cost
             FROM logs
             WHERE actual_model = ? OR selected_model = ?
             """,

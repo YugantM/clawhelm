@@ -65,6 +65,10 @@ def score_model(
     if sample_count >= QUALITY_FLOOR_MIN_SAMPLES and success_rate < QUALITY_FLOOR_THRESHOLD:
         return 0.0
 
+    # No successful requests yet — treat as cold-start (don't reward fast errors)
+    if success_rate == 0.0:
+        return cold_start_score(model, benchmark_latency=benchmark_latency) * 0.5
+
     live_latency = max(float(stats.get("avg_latency", 1.0)), 0.001)
 
     # Blend benchmark and live latency for models with few samples
