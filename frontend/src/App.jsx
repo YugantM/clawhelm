@@ -36,9 +36,6 @@ function createMessage(id, role, content, meta = null) {
 }
 
 function normalizeAssistantContent(response) {
-  const errorMessage = response?.error?.message || response?.detail?.error?.message || response?.detail?.message;
-  if (typeof errorMessage === "string" && errorMessage.trim()) return errorMessage;
-
   const content = response?.choices?.[0]?.message?.content;
   const fallbackText = response?.choices?.[0]?.text || response?.output_text || response?.raw_text;
 
@@ -50,7 +47,11 @@ function normalizeAssistantContent(response) {
     if (text.trim()) return text;
   }
 
-  return "No response received.";
+  // Check for error messages last — return null so caller can handle as error
+  const errorMessage = response?.error?.message || response?.detail?.error?.message || response?.detail?.message;
+  if (typeof errorMessage === "string" && errorMessage.trim()) return null;
+
+  return null;
 }
 
 function extractMeta(response) {
@@ -320,27 +321,37 @@ export default function App() {
         { model: selectedModel },
       );
       const content = normalizeAssistantContent(response);
-      const meta = extractMeta(response);
-      setMessages((cur) => [...cur, createMessage(assistantId, "assistant", content, meta)]);
+      if (!content) {
+        // Provider returned an error (e.g. insufficient credits) — show as error banner, not chat bubble
+        const errMsg = response?.error?.message || response?.detail?.message || "Model returned an empty response.";
+        setChatError(errMsg);
+      } else {
+        const meta = extractMeta(response);
+        setMessages((cur) => [...cur, createMessage(assistantId, "assistant", content, meta)]);
 
-      // Save assistant message to session
-      if (currentUser && sessionId) {
-        try {
-          await addSessionMessage(sessionId, "assistant", content, meta);
-        } catch (err) {
-          console.error("Failed to save assistant message:", err);
-        }
-        // Auto-generate title for new sessions
-        if (isNewSession) {
-          generateAndSetTitle(sessionId, prompt, content);
+        // Save assistant message to session
+        if (currentUser && sessionId) {
+          try {
+            await addSessionMessage(sessionId, "assistant", content, meta);
+          } catch (err) {
+            console.error("Failed to save assistant message:", err);
+          }
+          // Auto-generate title for new sessions
+          if (isNewSession) {
+            generateAndSetTitle(sessionId, prompt, content);
+          }
         }
       }
     } catch (err) {
       const payload = err?.payload || null;
-      const content = normalizeAssistantContent(payload || { error: { message: err.message || "Request failed" } });
-      const meta = payload ? extractMeta(payload) : null;
-      setMessages((cur) => [...cur, createMessage(assistantId, "assistant", content, meta)]);
-      if (!payload) setChatError(err.message || "Failed to send");
+      const content = normalizeAssistantContent(payload);
+      if (content) {
+        const meta = extractMeta(payload);
+        setMessages((cur) => [...cur, createMessage(assistantId, "assistant", content, meta)]);
+      } else {
+        const errMsg = payload?.error?.message || payload?.detail?.message || err.message || "Request failed";
+        setChatError(errMsg);
+      }
     } finally {
       pendingRef.current = false;
       setPendingChat(false);
@@ -459,7 +470,12 @@ export default function App() {
         </div>
       </header>
 
-      {chatError ? <div className="error-banner">{chatError}</div> : null}
+      {chatError ? (
+        <div className="error-banner" onClick={() => setChatError("")} role="alert">
+          {chatError}
+          <button className="error-banner__dismiss" onClick={() => setChatError("")} aria-label="Dismiss">&times;</button>
+        </div>
+      ) : null}
 
       <main className="app-main">
         <Chat

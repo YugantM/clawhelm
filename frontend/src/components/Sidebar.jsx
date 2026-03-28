@@ -62,10 +62,13 @@ export default function Sidebar({
             </div>
           ) : (
             sessions.map((s) => (
-              <button
+              <div
                 key={s.id}
                 className={`sidebar__session ${s.id === activeSessionId ? "sidebar__session--active" : ""}`}
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelectSession(s.id)}
+                onKeyDown={(e) => e.key === "Enter" && onSelectSession(s.id)}
               >
                 <div className="sidebar__session-info">
                   <span className="sidebar__session-title">
@@ -85,7 +88,7 @@ export default function Sidebar({
                     <path d="M3 3l8 8M11 3L3 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                   </svg>
                 </button>
-              </button>
+              </div>
             ))
           )}
         </div>
