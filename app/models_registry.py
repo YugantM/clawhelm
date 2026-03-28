@@ -204,7 +204,7 @@ class ModelRegistry:
                 context_length=int(item.get("context_length") or 4096),
                 max_completion_tokens=int(top_provider.get("max_completion_tokens") or 0),
                 modality=str(architecture.get("modality") or "text->text"),
-                display_name=str(item.get("name") or model_id),
+                display_name=str(item.get("name") or model_id).replace(" (free)", ""),
             )
 
     @staticmethod

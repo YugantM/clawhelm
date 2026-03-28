@@ -142,13 +142,9 @@ async def get_chat_models():
         if m.get("is_free"):
             model_entries.append({**m, "group": "free", "_dim": dimension_scores(m)})
 
-    # Paid models — only if a non-free provider key is configured
-    has_paid = any(
-        provider_registry.is_enabled(name)
-        for name in provider_registry.all_names()
-        if not getattr(provider_registry.get(name), "supports_free", False)
-    )
-    if has_paid:
+    # Paid models — show if any provider with an API key is enabled
+    has_provider = any(provider_registry.is_enabled(name) for name in provider_registry.all_names())
+    if has_provider:
         for m in available:
             if not m.get("is_free"):
                 model_entries.append({**m, "group": "paid", "_dim": dimension_scores(m)})
@@ -183,16 +179,17 @@ async def get_chat_models():
             desc_parts.append(f"Up to {tok_k} output tokens")
         if modality and modality != "text->text":
             desc_parts.append(f"Supports {modality}")
-        display = m.get("display_name") or m["model_id"]
+        raw_display = m.get("display_name") or m["model_id"]
+        display = raw_display.replace(" (free)", "").replace(":free", "")
         description = ". ".join(desc_parts) + ("." if desc_parts else "")
 
         options.append(ChatModelOption(
             id=m["model_id"],
-            label=m.get("display_name") or m["model_id"],
+            label=display,
             model_id=m["model_id"],
             is_free=m.get("is_free", False),
             group=m["group"],
-            display_name=m.get("display_name", ""),
+            display_name=display,
             context_length=ctx,
             max_completion_tokens=max_tok,
             modality=modality,
