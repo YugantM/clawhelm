@@ -27,10 +27,28 @@ function shortenName(name) {
 }
 
 function getSelectedLabel(models, selectedModel) {
-  if (selectedModel === "auto") return "Auto";
+  if (selectedModel === "auto") return null; // use icon instead
   const m = models.find((m) => m.id === selectedModel);
   if (!m) return selectedModel;
   return shortenName(m.display_name || m.label || m.id);
+}
+
+function WheelIcon({ size = 20 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 190 190" fill="none">
+      <circle cx="82" cy="82" r="59" stroke="currentColor" strokeWidth="10"/>
+      <path d="M82 43V62" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
+      <path d="M82 102V121" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
+      <path d="M43 82H62" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
+      <path d="M102 82H121" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
+      <path d="M54.4 54.4L67.8 67.8" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
+      <path d="M96.2 96.2L109.6 109.6" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
+      <path d="M109.6 54.4L96.2 67.8" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
+      <path d="M67.8 96.2L54.4 109.6" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
+      <circle cx="82" cy="82" r="20" fill="none" stroke="currentColor" strokeWidth="7"/>
+      <circle cx="82" cy="82" r="6.5" fill="currentColor"/>
+    </svg>
+  );
 }
 
 export default function ModelSelector({ models, selectedModel, onModelChange, onShowAllModels }) {
@@ -55,6 +73,7 @@ export default function ModelSelector({ models, selectedModel, onModelChange, on
     return () => document.removeEventListener("keydown", handleKey);
   }, [open]);
 
+  const selectedLabel = getSelectedLabel(models, selectedModel);
   const autoModel = models.find((m) => m.id === "auto");
   const nonAuto = models.filter((m) => m.id !== "auto");
   const topModels = [...nonAuto]
@@ -65,12 +84,17 @@ export default function ModelSelector({ models, selectedModel, onModelChange, on
     <div className="model-selector" ref={ref}>
       <button
         type="button"
-        className="model-trigger"
+        className={`model-trigger${!selectedLabel ? " model-trigger--icon" : ""}`}
         onClick={() => setOpen(!open)}
         aria-expanded={open}
+        title={selectedLabel || "Auto — best model for your query"}
       >
-        <span className="model-trigger__label">{getSelectedLabel(models, selectedModel)}</span>
-        <svg className="model-trigger__chevron" width="12" height="12" viewBox="0 0 12 12" fill="none">
+        {selectedLabel ? (
+          <span className="model-trigger__label">{selectedLabel}</span>
+        ) : (
+          <WheelIcon size={20} />
+        )}
+        <svg className="model-trigger__chevron" width="10" height="10" viewBox="0 0 12 12" fill="none">
           <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       </button>

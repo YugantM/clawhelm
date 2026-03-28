@@ -36,7 +36,7 @@ body {
   min-width: 320px;
 }
 
-#root { height: 100vh; }
+#root { height: 100dvh; height: 100vh; }
 
 button, textarea, input, select { font: inherit; }
 
@@ -45,6 +45,7 @@ button, textarea, input, select { font: inherit; }
 .app-shell {
   display: flex;
   flex-direction: column;
+  height: 100dvh;
   height: 100vh;
   overflow: hidden;
 }
@@ -449,7 +450,6 @@ button, textarea, input, select { font: inherit; }
   justify-content: center;
   text-align: center;
   height: 100%;
-  min-height: 50vh;
   gap: 12px;
   padding: 40px 20px;
 }
@@ -750,18 +750,24 @@ button, textarea, input, select { font: inherit; }
 
 .composer {
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
   max-width: var(--max-width);
   width: 100%;
   margin: 0 auto;
   padding: 12px 16px 20px;
 }
 
-.composer__model-row {
+.composer__box {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 6px 6px 6px 6px;
+  background: var(--bg-surface);
+  transition: border-color 0.15s ease;
+}
+.composer__box:focus-within {
+  border-color: rgba(59, 130, 246, 0.35);
 }
 
 /* ---- Model Selector (trigger + popup) ---- */
@@ -771,20 +777,25 @@ button, textarea, input, select { font: inherit; }
 .model-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  border: 1px solid var(--border);
+  gap: 4px;
+  border: none;
   border-radius: 999px;
-  padding: 5px 14px;
-  background: var(--bg-surface);
+  padding: 6px 10px;
+  background: transparent;
   color: var(--text-secondary);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   cursor: pointer;
   transition: all 0.15s ease;
-  max-width: 340px;
+  max-width: 200px;
+  flex-shrink: 0;
 }
 .model-trigger:hover {
-  border-color: rgba(59, 130, 246, 0.3);
   color: var(--text-primary);
+  background: rgba(255,255,255,0.05);
+}
+.model-trigger--icon {
+  padding: 6px 6px;
+  gap: 2px;
 }
 .model-trigger__label {
   overflow: hidden;
@@ -967,30 +978,19 @@ button, textarea, input, select { font: inherit; }
   padding: 1px 6px;
 }
 
-.composer__input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
-
 .composer__input {
   flex: 1;
   resize: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px 16px;
-  background: var(--bg-surface);
+  border: none;
+  padding: 8px 4px;
+  background: transparent;
   color: var(--text-primary);
   font-size: 0.92rem;
   line-height: 1.5;
-  min-height: 46px;
+  min-height: 36px;
   max-height: 160px;
   overflow-y: auto;
   outline: none;
-  transition: border-color 0.15s ease;
-}
-.composer__input:focus {
-  border-color: rgba(59, 130, 246, 0.35);
 }
 .composer__input::placeholder {
   color: var(--text-tertiary);
@@ -1000,8 +1000,8 @@ button, textarea, input, select { font: inherit; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
+  width: 36px;
+  height: 36px;
   border: none;
   border-radius: 50%;
   background: var(--brand-gradient);
@@ -1011,7 +1011,7 @@ button, textarea, input, select { font: inherit; }
   transition: opacity 0.15s ease;
 }
 .composer__send:disabled {
-  opacity: 0.35;
+  opacity: 0.25;
   cursor: default;
 }
 .composer__send:not(:disabled):hover {
@@ -1673,7 +1673,7 @@ button, textarea, input, select { font: inherit; }
 @media (max-width: 640px) {
   .app-header { padding: 0 12px; }
   .chat__thread { padding: 16px 8px; }
-  .composer { padding: 8px 8px 16px; }
+  .composer { padding: 8px 8px 12px; }
   .message__bubble { max-width: 92%; }
   .chat__empty-title { font-size: 1.8rem; }
   .settings-grid { grid-template-columns: 1fr; }

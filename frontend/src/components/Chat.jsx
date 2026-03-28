@@ -69,17 +69,15 @@ export default function Chat({ messages, pending, onSend, currentUser, models = 
       </div>
 
       <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-        {showModelSelector && (
-          <div className="composer__model-row">
+        <div className="composer__box">
+          {showModelSelector && (
             <ModelSelector
               models={models}
               selectedModel={selectedModel}
               onModelChange={onModelChange}
               onShowAllModels={onShowAllModels}
             />
-          </div>
-        )}
-        <div className="composer__input-row">
+          )}
           <textarea
             className="composer__input"
             value={input}
@@ -91,7 +89,7 @@ export default function Chat({ messages, pending, onSend, currentUser, models = 
             rows={1}
           />
           <button type="submit" className="composer__send" disabled={pending || !input.trim()} aria-label="Send">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
               <path d="M3 10h14M11 4l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
