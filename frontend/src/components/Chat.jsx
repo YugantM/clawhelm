@@ -76,6 +76,7 @@ export default function Chat({ messages, pending, onSend, currentUser, models = 
               selectedModel={selectedModel}
               onModelChange={onModelChange}
               onShowAllModels={onShowAllModels}
+              pending={pending}
             />
           )}
           <textarea

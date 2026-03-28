@@ -10,32 +10,34 @@ function formatContext(len) {
 function shortenName(name) {
   if (!name) return "";
   let short = name;
-  // Strip :free suffix — we show free/paid badge separately
   short = short.replace(/:free$/, "");
-  // Capitalize vendor/model format: "nvidia/nemotron" → "Nvidia Nemotron"
   if (short.includes("/")) {
     const parts = short.split("/");
     const vendor = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
     let model = parts.slice(1).join("/");
-    // Capitalize first letter of model name
     model = model.charAt(0).toUpperCase() + model.slice(1);
     short = `${vendor} ${model}`;
   }
-  // Truncate overly long names
   if (short.length > 32) short = short.slice(0, 30) + "…";
   return short;
 }
 
 function getSelectedLabel(models, selectedModel) {
-  if (selectedModel === "auto") return null; // use icon instead
+  if (selectedModel === "auto") return null;
   const m = models.find((m) => m.id === selectedModel);
   if (!m) return selectedModel;
   return shortenName(m.display_name || m.label || m.id);
 }
 
-function WheelIcon({ size = 20 }) {
+function WheelIcon({ size = 22, spinning = false }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 190 190" fill="none">
+    <svg
+      className={`wheel-icon${spinning ? " wheel-icon--spinning" : ""}`}
+      width={size}
+      height={size}
+      viewBox="0 0 190 190"
+      fill="none"
+    >
       <circle cx="82" cy="82" r="59" stroke="currentColor" strokeWidth="10"/>
       <path d="M82 43V62" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
       <path d="M82 102V121" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
@@ -51,7 +53,7 @@ function WheelIcon({ size = 20 }) {
   );
 }
 
-export default function ModelSelector({ models, selectedModel, onModelChange, onShowAllModels }) {
+export default function ModelSelector({ models, selectedModel, onModelChange, onShowAllModels, pending = false }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -73,6 +75,7 @@ export default function ModelSelector({ models, selectedModel, onModelChange, on
     return () => document.removeEventListener("keydown", handleKey);
   }, [open]);
 
+  const isAuto = selectedModel === "auto";
   const selectedLabel = getSelectedLabel(models, selectedModel);
   const autoModel = models.find((m) => m.id === "auto");
   const nonAuto = models.filter((m) => m.id !== "auto");
@@ -84,25 +87,20 @@ export default function ModelSelector({ models, selectedModel, onModelChange, on
     <div className="model-selector" ref={ref}>
       <button
         type="button"
-        className={`model-trigger${!selectedLabel ? " model-trigger--icon" : ""}`}
+        className={`model-trigger ${isAuto ? "model-trigger--auto" : "model-trigger--manual"}`}
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         title={selectedLabel || "Auto — best model for your query"}
       >
-        {selectedLabel ? (
+        <WheelIcon size={22} spinning={pending} />
+        {selectedLabel && (
           <span className="model-trigger__label">{selectedLabel}</span>
-        ) : (
-          <WheelIcon size={20} />
         )}
-        <svg className="model-trigger__chevron" width="10" height="10" viewBox="0 0 12 12" fill="none">
-          <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
       </button>
 
       {open && (
         <div className="model-popup">
           <div className="model-popup__grid">
-            {/* Auto tile */}
             {autoModel && (
               <button
                 type="button"
@@ -110,16 +108,13 @@ export default function ModelSelector({ models, selectedModel, onModelChange, on
                 onClick={() => { onModelChange("auto"); setOpen(false); }}
               >
                 <div className="mtile__icon">
-                  <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-                    <path d="M11 2l2.5 5.5L19 9l-4 4 1 5.5L11 16l-5 2.5 1-5.5-4-4 5.5-1.5z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-                  </svg>
+                  <WheelIcon size={22} />
                 </div>
                 <div className="mtile__name">Auto</div>
                 <div className="mtile__sub">Best pick</div>
               </button>
             )}
 
-            {/* Top model tiles */}
             {topModels.map((m) => {
               const ctx = formatContext(m.context_length);
               return (
@@ -149,7 +144,6 @@ export default function ModelSelector({ models, selectedModel, onModelChange, on
               );
             })}
 
-            {/* Show All tile — always visible */}
             <button
               type="button"
               className="mtile mtile--action"

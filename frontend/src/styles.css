@@ -780,22 +780,38 @@ button, textarea, input, select { font: inherit; }
   gap: 4px;
   border: none;
   border-radius: 999px;
-  padding: 6px 10px;
+  padding: 6px 8px;
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   cursor: pointer;
   transition: all 0.15s ease;
-  max-width: 200px;
+  max-width: 220px;
   flex-shrink: 0;
 }
-.model-trigger:hover {
-  color: var(--text-primary);
-  background: rgba(255,255,255,0.05);
+.model-trigger--auto {
+  color: var(--brand, #3b82f6);
 }
-.model-trigger--icon {
-  padding: 6px 6px;
-  gap: 2px;
+.model-trigger--auto:hover {
+  background: rgba(59, 130, 246, 0.1);
+}
+.model-trigger--manual {
+  color: var(--text-tertiary);
+}
+.model-trigger--manual:hover {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Wheel spinning animation */
+.wheel-icon {
+  transition: color 0.15s ease;
+}
+.wheel-icon--spinning {
+  animation: wheel-spin 1.2s linear infinite;
+}
+@keyframes wheel-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 .model-trigger__label {
   overflow: hidden;

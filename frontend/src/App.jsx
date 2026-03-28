@@ -433,9 +433,6 @@ export default function App() {
               <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
           </button>
-          <div className="app-header__brand">
-            <img className="app-header__icon" src={iconSrc} alt="ClawHelm" />
-          </div>
         </div>
 
         <button type="button" className="new-chat-button" onClick={handleNewChat}>
