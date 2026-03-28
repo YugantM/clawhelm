@@ -112,6 +112,22 @@ class Database:
             self._ensure_column(connection, "logs", "status_code", "INTEGER")
             self._ensure_column(connection, "logs", "fallback_used", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(connection, "logs", "estimated_cost", "REAL NOT NULL DEFAULT 0")
+            # Benchmark results table for backtesting
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS benchmark_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    model_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    prompt_category TEXT NOT NULL,
+                    latency REAL,
+                    status TEXT NOT NULL,
+                    tokens_used INTEGER,
+                    created_at TEXT DEFAULT (datetime('now'))
+                )
+                """
+            )
             self._fix_legacy_columns(connection)
             connection.commit()
 
@@ -679,6 +695,73 @@ class Database:
         with self._connect() as connection:
             connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             connection.commit()
+
+    # ── Benchmark results ─────────────────────────────────────
+
+    def insert_benchmark_result(
+        self,
+        run_id: str,
+        model_id: str,
+        provider: str,
+        prompt_category: str,
+        latency: float | None,
+        status: str,
+        tokens_used: int | None,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO benchmark_results
+                    (run_id, model_id, provider, prompt_category, latency, status, tokens_used)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, model_id, provider, prompt_category, latency, status, tokens_used),
+            )
+            connection.commit()
+
+    def get_benchmark_latency(self, model_id: str) -> float | None:
+        """Average latency from the most recent successful benchmark run for a model."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT AVG(latency) as avg_latency
+                FROM benchmark_results
+                WHERE model_id = ? AND status = 'success' AND latency IS NOT NULL
+                  AND run_id = (
+                      SELECT run_id FROM benchmark_results
+                      ORDER BY created_at DESC LIMIT 1
+                  )
+                """,
+                (model_id,),
+            ).fetchone()
+            return row["avg_latency"] if row and row["avg_latency"] is not None else None
+
+    def get_benchmark_results_summary(self) -> list[dict]:
+        """Latest benchmark results grouped by model."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT model_id, provider,
+                       COUNT(*) as tests,
+                       SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successes,
+                       AVG(CASE WHEN status = 'success' THEN latency END) as avg_latency
+                FROM benchmark_results
+                WHERE run_id = (
+                    SELECT run_id FROM benchmark_results
+                    ORDER BY created_at DESC LIMIT 1
+                )
+                GROUP BY model_id, provider
+                ORDER BY avg_latency ASC
+                """,
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def has_benchmark_data(self) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) as cnt FROM benchmark_results"
+            ).fetchone()
+            return bool(row and row["cnt"] > 0)
 
 
 db = Database()

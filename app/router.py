@@ -51,8 +51,10 @@ def _get_cached_score(model_id: str, model_dict: dict[str, Any]) -> float:
         if now - cached_at < SCORE_CACHE_TTL:
             return cached_score
 
+    from .db import db
     stats = get_model_stats(model_id)
-    computed_score = score_model(model_dict, stats)
+    benchmark_latency = db.get_benchmark_latency(model_id)
+    computed_score = score_model(model_dict, stats, benchmark_latency=benchmark_latency)
     if model_dict.get("is_free"):
         computed_score += FREE_MODEL_BONUS
     _score_cache[model_id] = (computed_score, now)

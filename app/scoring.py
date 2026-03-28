@@ -16,8 +16,8 @@ QUALITY_FLOOR_MIN_SAMPLES = 5
 QUALITY_FLOOR_THRESHOLD = 0.3
 
 
-def cold_start_score(model: dict[str, Any]) -> float:
-    """Score a model with no request history using metadata (pricing, context)."""
+def cold_start_score(model: dict[str, Any], *, benchmark_latency: float | None = None) -> float:
+    """Score a model with no request history using metadata and optional benchmark data."""
     prompt_cost = float(model.get("prompt_cost", 0.0))
     is_free = model.get("is_free", False)
     context_length = int(model.get("context_length", 4096))
@@ -32,10 +32,16 @@ def cold_start_score(model: dict[str, Any]) -> float:
     free_bonus = 0.1 if is_free else 0.0
     context_bonus = 0.02 if context_length >= 128_000 else 0.0
 
-    # quality(unknown=0.5) * 0.4 + speed(unknown=0.5) * 0.35 + cost(known) * 0.25 + bonuses
+    # Speed: use benchmark latency if available, otherwise neutral
+    if benchmark_latency is not None and benchmark_latency > 0:
+        raw_speed = 1.0 / max(benchmark_latency, 0.1)
+        speed_score = min(raw_speed / 10.0, 1.0)  # normalize to 0-1
+    else:
+        speed_score = NEUTRAL_SCORE
+
     score = (
         NEUTRAL_SCORE * QUALITY_WEIGHT
-        + NEUTRAL_SCORE * SPEED_WEIGHT
+        + speed_score * SPEED_WEIGHT
         + cost_score * COST_WEIGHT
         + free_bonus
         + context_bonus
@@ -43,10 +49,15 @@ def cold_start_score(model: dict[str, Any]) -> float:
     return round(score, 6)
 
 
-def score_model(model: dict[str, Any], stats: dict[str, float | int]) -> float:
+def score_model(
+    model: dict[str, Any],
+    stats: dict[str, float | int],
+    *,
+    benchmark_latency: float | None = None,
+) -> float:
     sample_count = int(stats.get("sample_count", 0))
     if sample_count == 0:
-        return cold_start_score(model)
+        return cold_start_score(model, benchmark_latency=benchmark_latency)
 
     success_rate = float(stats.get("success_rate", NEUTRAL_SCORE))
 
@@ -54,7 +65,15 @@ def score_model(model: dict[str, Any], stats: dict[str, float | int]) -> float:
     if sample_count >= QUALITY_FLOOR_MIN_SAMPLES and success_rate < QUALITY_FLOOR_THRESHOLD:
         return 0.0
 
-    latency = max(float(stats.get("avg_latency", 1.0)), 0.001)
+    live_latency = max(float(stats.get("avg_latency", 1.0)), 0.001)
+
+    # Blend benchmark and live latency for models with few samples
+    if benchmark_latency is not None and benchmark_latency > 0 and sample_count < 10:
+        weight = sample_count / 10.0
+        latency = weight * live_latency + (1 - weight) * benchmark_latency
+    else:
+        latency = live_latency
+
     cost = max(float(stats.get("avg_cost", 0.0)), 0.0)
     score = (
         success_rate * QUALITY_WEIGHT

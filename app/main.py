@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import secrets
 import uuid
@@ -36,6 +37,7 @@ from .models_registry import model_registry
 from .oauth import create_oauth_client
 from .proxy import forward_chat_completion
 from .router import is_valid_chat_model
+from .backtest import backtest_scheduler, get_backtest_status, run_backtest
 from .settings import settings_store
 
 load_dotenv()
@@ -47,7 +49,17 @@ async def lifespan(app: FastAPI):
     timeout = httpx.Timeout(connect=30.0, read=300.0, write=300.0, pool=300.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         app.state.http_client = client
-        yield
+        # Auto-refresh models from OpenRouter on startup
+        try:
+            await model_registry.refresh(client)
+        except Exception:
+            pass  # non-fatal — will retry via scheduler
+        # Launch backtest scheduler in background
+        scheduler_task = asyncio.create_task(backtest_scheduler(client))
+        try:
+            yield
+        finally:
+            scheduler_task.cancel()
 
 
 app = FastAPI(title="clawhelm", lifespan=lifespan)
@@ -213,6 +225,25 @@ async def get_stats():
 async def refresh_models(request: Request):
     client: httpx.AsyncClient = request.app.state.http_client
     return await model_registry.refresh(client)
+
+
+# Backtest endpoints
+@app.post("/backtest/run")
+async def start_backtest(request: Request):
+    client: httpx.AsyncClient = request.app.state.http_client
+    run_id = await run_backtest(client)
+    status = get_backtest_status()
+    return {"run_id": run_id, "status": status["status"]}
+
+
+@app.get("/backtest/status")
+async def backtest_status():
+    return get_backtest_status()
+
+
+@app.get("/backtest/results")
+async def backtest_results():
+    return db.get_benchmark_results_summary()
 
 
 # OAuth endpoints
