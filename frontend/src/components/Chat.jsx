@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import Message from "./Message";
+import ModelSelector from "./ModelSelector";
 
-export default function Chat({ messages, pending, onSend, currentUser }) {
+export default function Chat({ messages, pending, onSend, currentUser, models = [], selectedModel = "auto", onModelChange, onShowAllModels }) {
   const [input, setInput] = useState("");
   const threadRef = useRef(null);
   const submitLockRef = useRef(false);
@@ -22,6 +23,8 @@ export default function Chat({ messages, pending, onSend, currentUser }) {
       submitLockRef.current = false;
     }
   }
+
+  const showModelSelector = models.length > 1;
 
   return (
     <div className="chat">
@@ -66,21 +69,33 @@ export default function Chat({ messages, pending, onSend, currentUser }) {
       </div>
 
       <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-        <textarea
-          className="composer__input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
-          }}
-          placeholder="Message ClawHelm..."
-          rows={1}
-        />
-        <button type="submit" className="composer__send" disabled={pending || !input.trim()} aria-label="Send">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <path d="M3 10h14M11 4l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </button>
+        {showModelSelector && (
+          <div className="composer__model-row">
+            <ModelSelector
+              models={models}
+              selectedModel={selectedModel}
+              onModelChange={onModelChange}
+              onShowAllModels={onShowAllModels}
+            />
+          </div>
+        )}
+        <div className="composer__input-row">
+          <textarea
+            className="composer__input"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+            }}
+            placeholder="Message ClawHelm..."
+            rows={1}
+          />
+          <button type="submit" className="composer__send" disabled={pending || !input.trim()} aria-label="Send">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M3 10h14M11 4l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
       </form>
     </div>
   );

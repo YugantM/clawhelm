@@ -1,3 +1,5 @@
+import ModelDashboard from "../components/ModelDashboard";
+
 export default function Settings({ health, currentUser }) {
   const backendUp = health?.status === "ok";
 
@@ -46,16 +48,23 @@ export default function Settings({ health, currentUser }) {
         </div>
       </section>
 
+      {backendUp && (
+        <section className="panel">
+          <h2>Model Performance</h2>
+          <ModelDashboard />
+        </section>
+      )}
+
       <section className="panel">
         <h2>About</h2>
         <div className="settings-list">
           <div className="settings-list__row">
             <span>Version</span>
-            <strong>0.1.0</strong>
+            <strong>0.2.0</strong>
           </div>
           <div className="settings-list__row">
-            <span>Models</span>
-            <strong>Auto-selected via OpenRouter</strong>
+            <span>Routing</span>
+            <strong>Smart auto-selection with quality + speed + cost scoring</strong>
           </div>
         </div>
       </section>

@@ -3,6 +3,7 @@ import {
   addSessionMessage,
   createSession,
   deleteSession,
+  getChatModels,
   getCurrentUser,
   getHealth,
   getSession,
@@ -15,11 +16,13 @@ import {
 import Chat from "./components/Chat";
 import LoginModal from "./components/LoginModal";
 import Sidebar from "./components/Sidebar";
+import Models from "./pages/Models";
 import Settings from "./pages/Settings";
 
 const HEALTH_POLL_MS = 10000;
 const SESSION_POLL_MS = 15000;
 const SESSION_KEY = "clawhelm_active_session";
+const MODEL_KEY = "clawhelm_selected_model";
 
 function createMessageId(prefix) {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -96,10 +99,27 @@ export default function App() {
   });
   const [loadingSessions, setLoadingSessions] = useState(false);
 
+  // Model selector state
+  const [chatModels, setChatModels] = useState([]);
+  const [selectedModel, setSelectedModel] = useState(() => {
+    try { return localStorage.getItem(MODEL_KEY) || "auto"; } catch { return "auto"; }
+  });
+  const [showModelsPage, setShowModelsPage] = useState(false);
+
   const pendingRef = useRef(false);
   const messagesRef = useRef([]);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // Fetch available models on mount
+  useEffect(() => {
+    getChatModels().then(setChatModels).catch(() => {});
+  }, []);
+
+  // Persist selectedModel to localStorage
+  useEffect(() => {
+    try { localStorage.setItem(MODEL_KEY, selectedModel); } catch {}
+  }, [selectedModel]);
 
   // Persist activeSessionId to localStorage
   useEffect(() => {
@@ -296,6 +316,7 @@ export default function App() {
     try {
       const response = await postChat(
         next.map((m) => ({ role: m.role, content: m.content })),
+        { model: selectedModel },
       );
       const content = normalizeAssistantContent(response);
       const meta = extractMeta(response);
@@ -445,6 +466,10 @@ export default function App() {
           pending={pendingChat}
           onSend={handleSend}
           currentUser={currentUser}
+          models={chatModels}
+          selectedModel={selectedModel}
+          onModelChange={setSelectedModel}
+          onShowAllModels={() => setShowModelsPage(true)}
         />
       </main>
 
@@ -454,6 +479,19 @@ export default function App() {
         onSkip={() => setShowLoginModal(false)}
         authError={authError}
       />
+
+      {showModelsPage ? (
+        <div className="modal-overlay" onClick={() => setShowModelsPage(false)}>
+          <div className="modal-card modal-card--wide" onClick={(e) => e.stopPropagation()}>
+            <Models
+              models={chatModels}
+              selectedModel={selectedModel}
+              onModelChange={(id) => { setSelectedModel(id); setShowModelsPage(false); }}
+              onClose={() => setShowModelsPage(false)}
+            />
+          </div>
+        </div>
+      ) : null}
 
       {showSettings ? (
         <div className="modal-overlay" onClick={() => setShowSettings(false)}>
