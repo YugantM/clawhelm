@@ -27,6 +27,15 @@ def _env_float(name: str, default: float) -> float:
 def get_model_rate_per_1k(model: str) -> float:
     if model == OPENROUTER_FREE_ROUTER or model.endswith(":free"):
         return 0.0
+
+    # Try real pricing from registry metadata
+    from .models_registry import model_registry
+    model_info = model_registry.get_model(model)
+    if model_info and (model_info.prompt_cost > 0 or model_info.completion_cost > 0):
+        avg_per_token = (model_info.prompt_cost + model_info.completion_cost) / 2
+        return avg_per_token * 1000
+
+    # Fallback to hardcoded tiers
     if model == get_cheap_model():
         return _env_float("CHEAP_MODEL_COST_PER_1K_TOKENS", 0.5)
     if model == get_mid_model():

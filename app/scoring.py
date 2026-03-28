@@ -6,26 +6,96 @@ from typing import Any
 NEUTRAL_SCORE = 0.5
 SMALL_COST_VALUE = 0.0001
 
+# Weights: quality most important, speed prioritized over cost
+QUALITY_WEIGHT = 0.4
+SPEED_WEIGHT = 0.35
+COST_WEIGHT = 0.25
+
+# Quality floor: don't route to consistently broken models
+QUALITY_FLOOR_MIN_SAMPLES = 5
+QUALITY_FLOOR_THRESHOLD = 0.3
+
+
+def cold_start_score(model: dict[str, Any]) -> float:
+    """Score a model with no request history using metadata (pricing, context)."""
+    prompt_cost = float(model.get("prompt_cost", 0.0))
+    is_free = model.get("is_free", False)
+    context_length = int(model.get("context_length", 4096))
+
+    # Cost component: cheaper = higher score
+    if prompt_cost <= 0:
+        cost_score = 1.0
+    else:
+        cost_per_million = prompt_cost * 1_000_000
+        cost_score = min(1.0 / max(cost_per_million, 0.01), 1.0)
+
+    free_bonus = 0.1 if is_free else 0.0
+    context_bonus = 0.02 if context_length >= 128_000 else 0.0
+
+    # quality(unknown=0.5) * 0.4 + speed(unknown=0.5) * 0.35 + cost(known) * 0.25 + bonuses
+    score = (
+        NEUTRAL_SCORE * QUALITY_WEIGHT
+        + NEUTRAL_SCORE * SPEED_WEIGHT
+        + cost_score * COST_WEIGHT
+        + free_bonus
+        + context_bonus
+    )
+    return round(score, 6)
+
 
 def score_model(model: dict[str, Any], stats: dict[str, float | int]) -> float:
     sample_count = int(stats.get("sample_count", 0))
     if sample_count == 0:
-        return NEUTRAL_SCORE
+        return cold_start_score(model)
 
     success_rate = float(stats.get("success_rate", NEUTRAL_SCORE))
+
+    # Quality floor: don't route to consistently broken models
+    if sample_count >= QUALITY_FLOOR_MIN_SAMPLES and success_rate < QUALITY_FLOOR_THRESHOLD:
+        return 0.0
+
     latency = max(float(stats.get("avg_latency", 1.0)), 0.001)
     cost = max(float(stats.get("avg_cost", 0.0)), 0.0)
     score = (
-        success_rate * 0.5 +
-        (1 / latency) * 0.25 +
-        (1 / (cost if cost > 0 else SMALL_COST_VALUE)) * 0.25
+        success_rate * QUALITY_WEIGHT
+        + (1 / latency) * SPEED_WEIGHT
+        + (1 / (cost if cost > 0 else SMALL_COST_VALUE)) * COST_WEIGHT
     )
     return round(score, 6)
+
+
+def dimension_scores(model: dict[str, Any]) -> dict[str, float]:
+    """Return per-dimension scores for ranking. Higher = better."""
+    prompt_cost = float(model.get("prompt_cost", 0.0))
+    is_free = model.get("is_free", False)
+
+    # Cost dimension: cheaper = higher score
+    if prompt_cost <= 0:
+        cost_score = 1.0
+    else:
+        cost_per_million = prompt_cost * 1_000_000
+        cost_score = min(1.0 / max(cost_per_million, 0.01), 1.0)
+    if is_free:
+        cost_score += 0.1
+
+    # Speed dimension: cold-start neutral (no live data available at listing time)
+    speed_score = NEUTRAL_SCORE
+
+    # Quality dimension: cold-start neutral
+    quality_score = NEUTRAL_SCORE
+
+    return {
+        "overall": cold_start_score(model),
+        "speed": round(speed_score, 6),
+        "quality": round(quality_score, 6),
+        "cost": round(cost_score, 6),
+    }
 
 
 def get_score_components(stats: dict[str, float | int], model: dict[str, Any] | None = None) -> dict[str, float | int]:
     sample_count = int(stats.get("sample_count", 0))
     if sample_count == 0:
+        cs = cold_start_score(model or {})
         return {
             "success_rate": NEUTRAL_SCORE,
             "avg_latency": float(stats.get("avg_latency", 1.0)),
@@ -34,7 +104,7 @@ def get_score_components(stats: dict[str, float | int], model: dict[str, Any] | 
             "latency_score": NEUTRAL_SCORE,
             "cost_score": NEUTRAL_SCORE,
             "confidence": 0.0,
-            "score": NEUTRAL_SCORE,
+            "score": cs,
         }
 
     avg_latency = max(float(stats.get("avg_latency", 1.0)), 0.001)

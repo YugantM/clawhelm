@@ -117,25 +117,83 @@ async def chat(request: Request, payload: ChatRequest):
 
 @app.get("/chat/models", response_model=list[ChatModelOption])
 async def get_chat_models():
-    free_openrouter_models = sorted(
-        model["model_id"]
-        for model in model_registry.get_available_models()
-        if model.get("provider") == "openrouter" and model.get("is_free")
-    )
+    from .providers import provider_registry
+    from .scoring import dimension_scores
 
-    options = [
-        ChatModelOption(id="auto", label="Auto", model_id=None, is_free=False, recommended=True),
-    ]
-    options.extend(
-        ChatModelOption(
-            id=model_id,
-            label=model_id,
-            model_id=model_id,
-            is_free=True,
-            recommended=False,
-        )
-        for model_id in free_openrouter_models
+    available = model_registry.get_available_models()
+
+    # Collect non-auto models with their dimension scores
+    model_entries: list[dict] = []
+
+    # Free models — always shown
+    for m in available:
+        if m.get("is_free"):
+            model_entries.append({**m, "group": "free", "_dim": dimension_scores(m)})
+
+    # Paid models — only if a non-free provider key is configured
+    has_paid = any(
+        provider_registry.is_enabled(name)
+        for name in provider_registry.all_names()
+        if not getattr(provider_registry.get(name), "supports_free", False)
     )
+    if has_paid:
+        for m in available:
+            if not m.get("is_free"):
+                model_entries.append({**m, "group": "paid", "_dim": dimension_scores(m)})
+
+    # Assign ranks per dimension (1-indexed, higher score = lower rank number)
+    for dim_key in ("overall", "speed", "quality", "cost"):
+        sorted_by_dim = sorted(model_entries, key=lambda e: e["_dim"][dim_key], reverse=True)
+        for i, entry in enumerate(sorted_by_dim):
+            rank_field = "rank" if dim_key == "overall" else f"rank_by_{dim_key}"
+            entry[rank_field] = i + 1
+
+    # Build response: Auto first, then models sorted by overall rank
+    options: list[ChatModelOption] = [
+        ChatModelOption(
+            id="auto", label="Auto (Recommended)", model_id=None,
+            is_free=False, recommended=True, group="auto",
+            display_name="Auto — best model for your query",
+        ),
+    ]
+
+    for m in sorted(model_entries, key=lambda e: e.get("rank", 999)):
+        prompt_cost = float(m.get("prompt_cost", 0))
+        completion_cost = float(m.get("completion_cost", 0))
+        ctx = m.get("context_length")
+        max_tok = m.get("max_completion_tokens")
+        modality = m.get("modality", "text->text")
+
+        # Build description from metadata (avoid duplicating badge/stat info)
+        desc_parts: list[str] = []
+        if max_tok:
+            tok_k = f"{max_tok // 1000}k" if max_tok >= 1000 else str(max_tok)
+            desc_parts.append(f"Up to {tok_k} output tokens")
+        if modality and modality != "text->text":
+            desc_parts.append(f"Supports {modality}")
+        display = m.get("display_name") or m["model_id"]
+        description = ". ".join(desc_parts) + ("." if desc_parts else "")
+
+        options.append(ChatModelOption(
+            id=m["model_id"],
+            label=m.get("display_name") or m["model_id"],
+            model_id=m["model_id"],
+            is_free=m.get("is_free", False),
+            group=m["group"],
+            display_name=m.get("display_name", ""),
+            context_length=ctx,
+            max_completion_tokens=max_tok,
+            modality=modality,
+            provider=m.get("provider", ""),
+            rank=m.get("rank"),
+            rank_by_speed=m.get("rank_by_speed"),
+            rank_by_quality=m.get("rank_by_quality"),
+            rank_by_cost=m.get("rank_by_cost"),
+            prompt_cost_per_m=round(prompt_cost * 1_000_000, 4) if prompt_cost > 0 else None,
+            completion_cost_per_m=round(completion_cost * 1_000_000, 4) if completion_cost > 0 else None,
+            description=description,
+        ))
+
     return options
 
 

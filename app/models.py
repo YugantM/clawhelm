@@ -72,6 +72,19 @@ class ChatModelOption(BaseModel):
     model_id: str | None = None
     is_free: bool
     recommended: bool = False
+    group: str = "other"
+    display_name: str = ""
+    context_length: int | None = None
+    max_completion_tokens: int | None = None
+    modality: str = "text->text"
+    provider: str = ""
+    rank: int | None = None
+    rank_by_speed: int | None = None
+    rank_by_quality: int | None = None
+    rank_by_cost: int | None = None
+    prompt_cost_per_m: float | None = None
+    completion_cost_per_m: float | None = None
+    description: str = ""
 
 
 class UserResponse(BaseModel):

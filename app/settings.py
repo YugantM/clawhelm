@@ -52,12 +52,15 @@ class SettingsStore:
         return await asyncio.to_thread(self._get_provider_view_sync)
 
     def _get_provider_view_sync(self) -> dict[str, Any]:
+        from .providers import provider_registry
         payload = self._read_sync()
         providers = payload.get("providers", {})
         result: dict[str, Any] = {}
-        for provider_name in ("openrouter", "openai"):
-            env_name = "OPENROUTER_API_KEY" if provider_name == "openrouter" else "PROVIDER_API_KEY"
-            env_value = os.getenv(env_name, "").strip()
+        for provider_name in provider_registry.all_names():
+            config = provider_registry.get(provider_name)
+            if config is None:
+                continue
+            env_value = os.getenv(config.api_key_env, "").strip()
             stored_value = str(providers.get(provider_name, {}).get("api_key", "")).strip()
             active_value = env_value or stored_value or ""
             result[provider_name] = {
@@ -69,7 +72,9 @@ class SettingsStore:
         }
 
     def get_provider_api_key(self, provider_name: str) -> str | None:
-        env_name = "OPENROUTER_API_KEY" if provider_name == "openrouter" else "PROVIDER_API_KEY"
+        from .providers import provider_registry
+        config = provider_registry.get(provider_name)
+        env_name = config.api_key_env if config else "PROVIDER_API_KEY"
         env_value = os.getenv(env_name, "").strip()
         if env_value:
             return env_value

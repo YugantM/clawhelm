@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import random
 import time
 from dataclasses import dataclass
@@ -9,11 +8,9 @@ from typing import Any
 
 from .models_registry import ModelRegistry, model_registry
 from .performance import get_model_stats
+from .providers import provider_registry
 from .scoring import score_model
-from .settings import settings_store
 
-OPENAI_PROVIDER = "openai"
-OPENROUTER_PROVIDER = "openrouter"
 OPENROUTER_FREE_ROUTER = "openrouter/free"
 
 FREE_MODEL_BONUS = 0.1
@@ -34,22 +31,6 @@ class RouteDecision:
     model_source: str
     routing_reason: str
     score: float | None
-
-
-def get_openai_base_url() -> str:
-    return os.getenv("PROVIDER_BASE_URL", "https://api.openai.com").rstrip("/")
-
-
-def get_openrouter_base_url() -> str:
-    return os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
-
-
-def get_openai_api_key() -> str | None:
-    return settings_store.get_provider_api_key("openai")
-
-
-def get_openrouter_api_key() -> str | None:
-    return settings_store.get_provider_api_key("openrouter")
 
 
 def encode_request_body(request_body: dict[str, Any]) -> bytes:
@@ -78,6 +59,22 @@ def _get_cached_score(model_id: str, model_dict: dict[str, Any]) -> float:
     return computed_score
 
 
+def _deduplicate_by_base_model(
+    scored: list[tuple[dict[str, Any], float]],
+) -> list[tuple[dict[str, Any], float]]:
+    """When same base model exists from multiple providers, keep only the best one."""
+    seen_base: dict[str, int] = {}
+    result: list[tuple[dict[str, Any], float]] = []
+    for model_dict, score in scored:
+        base = model_dict.get("base_model", model_dict["model_id"])
+        if base in seen_base:
+            # Already have a higher-scored entry for this base model — skip
+            continue
+        seen_base[base] = len(result)
+        result.append((model_dict, score))
+    return result
+
+
 def get_route_decisions(request_body: dict[str, Any] | None, registry: ModelRegistry = model_registry) -> list[RouteDecision]:
     available_models = registry.get_available_models()
     if not available_models:
@@ -98,6 +95,9 @@ def _score_and_rank(available_models: list[dict[str, Any]]) -> list[tuple[dict[s
         scored.append((model, model_score))
 
     scored.sort(key=lambda pair: pair[1], reverse=True)
+
+    # Deduplicate: same base model from multiple providers -> keep best
+    scored = _deduplicate_by_base_model(scored)
 
     if len(scored) > 1 and random.random() < EXPLORATION_RATE:
         explore_index = random.randint(1, len(scored) - 1)
@@ -129,8 +129,12 @@ def get_direct_route_decision(model_id: str, registry: ModelRegistry = model_reg
     candidate = {
         "provider": model.provider,
         "model_id": model.id,
+        "base_model": model.base_model,
         "is_free": model.is_free,
         "source": model.source,
+        "prompt_cost": model.prompt_cost,
+        "completion_cost": model.completion_cost,
+        "context_length": model.context_length,
     }
     stats = get_model_stats(model_id)
     candidate_score = score_model(candidate, stats)
@@ -138,14 +142,17 @@ def get_direct_route_decision(model_id: str, registry: ModelRegistry = model_reg
 
 
 def _build_decision(candidate: dict[str, Any], reason: str, candidate_score: float | None = None) -> RouteDecision:
-    provider = candidate["provider"]
+    provider_name = candidate["provider"]
+    config = provider_registry.get(provider_name)
+    if config is None:
+        raise ValueError(f"Unknown provider: {provider_name}")
     return RouteDecision(
         model=candidate["model_id"],
-        provider=provider,
-        base_url=get_openrouter_base_url() if provider == OPENROUTER_PROVIDER else get_openai_base_url(),
-        chat_path="/chat/completions" if provider == OPENROUTER_PROVIDER else "/v1/chat/completions",
-        api_key=get_openrouter_api_key() if provider == OPENROUTER_PROVIDER else get_openai_api_key(),
-        is_free_model=bool(candidate["is_free"]),
+        provider=provider_name,
+        base_url=provider_registry.get_base_url(provider_name),
+        chat_path=config.chat_path,
+        api_key=provider_registry.get_api_key(provider_name),
+        is_free_model=bool(candidate.get("is_free")),
         model_source="available_pool",
         routing_reason=reason,
         score=candidate_score,
