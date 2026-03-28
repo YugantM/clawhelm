@@ -170,6 +170,19 @@ def detect_request_source(request: Request, original_model: str | None) -> str:
     return "external"
 
 
+def _resolve_display_name(model_id: str | None) -> str | None:
+    """Look up a clean display name from the registry, stripping ':free' and '(free)'."""
+    if not model_id:
+        return None
+    info = model_registry.get_model(model_id)
+    if info and info.display_name:
+        return info.display_name.replace(" (free)", "").replace(":free", "")
+    # Fallback: clean up the raw ID
+    parts = model_id.split("/")
+    slug = parts[-1] if len(parts) > 1 else model_id
+    return slug.split(":")[0]
+
+
 def _enrich_response(
     payload: Any,
     *,
@@ -188,6 +201,7 @@ def _enrich_response(
         enriched["selected_model"] = selected_model
     if actual_model:
         enriched["actual_model"] = actual_model
+    enriched["display_name"] = _resolve_display_name(actual_model or selected_model)
     if provider:
         enriched["provider"] = provider
     if routing_score is not None:

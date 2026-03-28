@@ -57,6 +57,7 @@ function extractMeta(response) {
   return {
     actual_model: response?.actual_model || response?.model || null,
     selected_model: response?.selected_model || null,
+    display_name: response?.display_name || null,
     provider: response?.provider || null,
     latency: typeof response?.latency === "number" ? response.latency : null,
     routing_score: typeof response?.routing_score === "number" ? response.routing_score : null,

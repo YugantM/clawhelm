@@ -19,7 +19,7 @@ function formatLatency(seconds) {
 function Attribution({ meta }) {
   if (!meta) return null;
 
-  const model = formatModelName(meta.actual_model);
+  const model = meta.display_name || formatModelName(meta.actual_model);
   const provider = meta.provider;
   const latency = formatLatency(meta.latency);
   const fallback = meta.fallback_used;
