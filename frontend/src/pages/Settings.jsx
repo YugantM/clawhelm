@@ -64,7 +64,7 @@ export default function Settings({ health, currentUser }) {
           </div>
           <div className="settings-list__row">
             <span>Routing</span>
-            <strong>Smart auto-selection with quality + speed + cost scoring</strong>
+            <strong>Adaptive — picks the best model for every query</strong>
           </div>
         </div>
       </section>

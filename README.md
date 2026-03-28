@@ -6,162 +6,80 @@
 [![Pages](https://img.shields.io/github/actions/workflow/status/YugantM/clawhelm/deploy-pages.yml?branch=main&label=pages)](https://github.com/YugantM/clawhelm/actions/workflows/deploy-pages.yml)
 [![Live Demo](https://img.shields.io/badge/demo-live-22c55e)](https://yugantm.github.io/clawhelm/)
 
-**ClawHelm is an intelligent AI model router.** It picks the fastest, cheapest, and most capable model for every query from 350+ models across multiple providers.
+### Stop choosing AI models. Let ClawHelm choose for you.
 
-[Live Demo](https://yugantm.github.io/clawhelm/) · [Wiki](https://github.com/YugantM/clawhelm/wiki) · [Issues](https://github.com/YugantM/clawhelm/issues)
+ClawHelm connects to **350+ AI models** and automatically picks the best one for every message you send — the fastest, cheapest, and most reliable. No setup, no guesswork.
+
+[Try the Live Demo](https://yugantm.github.io/clawhelm/) · [User Guide](https://github.com/YugantM/clawhelm/wiki)
 
 ---
 
-## How It Works
+## Why ClawHelm?
 
-1. You send a message through the chat interface
-2. ClawHelm scores all available models on **quality**, **speed**, and **cost**
-3. The best model is selected and your request is forwarded
-4. The response is returned with full attribution (which model, provider, latency)
-5. If the selected model fails, ClawHelm automatically falls back to the next best
+Every AI provider has dozens of models. Some are fast, some are cheap, some are smart. Picking the right one for every question is exhausting.
 
-## Features
+**ClawHelm does it for you.** It learns which models perform best and routes every query to the optimal choice — automatically. If a model fails, it instantly retries with the next best option. You just chat.
 
-- **Adaptive Routing** — Weighted scoring (`quality 40% + speed 35% + cost 25%`) with exploration and fallback
-- **350+ Models** — Auto-synced from OpenRouter, plus OpenAI direct
-- **Tile-Based Model Selector** — Visual popup with top picks, or browse the full catalog with filters
-- **Markdown Chat** — Syntax-highlighted code blocks, tables, copy button, clean typography
-- **Smart Cold Start** — New models scored using real pricing and context metadata, not flat defaults
-- **Quality Floor** — Models with <30% success rate after 5+ requests are automatically excluded
-- **Performance Dashboard** — Request stats, model leaderboard, and scoring breakdown
-- **Multi-Provider Dedup** — Same base model from different providers? Only the best one is used
-- **Full Attribution** — Every response shows the actual model, provider, and latency
-- **Session History** — Chat sessions persist across page refreshes
-- **OAuth + Guest** — Google/GitHub sign-in or continue without an account
+## What You Get
+
+**Just chat** — Type a question, get the best answer. ClawHelm handles model selection behind the scenes.
+
+**350+ models, one interface** — Access models from OpenRouter and OpenAI through a single clean chat. No switching tabs or accounts.
+
+**Beautiful responses** — Code blocks with syntax highlighting and copy buttons, tables, formatted text — all rendered natively.
+
+**Pick your own model** — Want control? Browse the full catalog, filter by free/paid, and sort by speed, quality, or cost.
+
+**See what's happening** — Every response shows which model answered and how fast. Full transparency, zero complexity.
+
+**Automatic fallback** — If a model goes down mid-conversation, ClawHelm switches to the next best one seamlessly.
+
+**Free models first** — ClawHelm prioritizes free models that deliver great results, so you spend nothing unless you want to.
 
 ## Screenshots
 
-| Chat with Markdown Rendering | Model Selector |
+| Chat with Markdown | Model Selector |
 |:---:|:---:|
 | ![Chat](docs/screens/chat.png) | ![Models](docs/screens/dashboard.png) |
 
-## Quick Start
+## Get Started in 60 Seconds
 
-### Prerequisites
-
-- Python 3.10+
-- Node.js 18+
-- An [OpenRouter API key](https://openrouter.ai/keys) (free tier available)
-
-### macOS / Linux
+Grab a free [OpenRouter API key](https://openrouter.ai/keys), then:
 
 ```bash
 git clone https://github.com/YugantM/clawhelm.git
 cd clawhelm
-./install/install.sh --openrouter-api-key YOUR_OPENROUTER_KEY
+./install/install.sh --openrouter-api-key YOUR_KEY
 ./scripts/run_dashboard.sh
 ```
 
-### Windows PowerShell
+Open [localhost:5173](http://localhost:5173) and start chatting.
 
-```powershell
-git clone https://github.com/YugantM/clawhelm.git
-cd clawhelm
-.\install\install.ps1 --openrouter-api-key YOUR_OPENROUTER_KEY
-.\scripts\run_dashboard.ps1
-```
-
-Open [http://localhost:5173](http://localhost:5173) and start chatting.
+> **Windows?** Use `.\install\install.ps1` in PowerShell instead.
 
 ## Configuration
 
-### API Keys
+Paste your API key in **Settings > Provider Keys** — or set `OPENROUTER_API_KEY` in `.env`. That's it.
 
-ClawHelm supports two ways to configure provider keys:
+Want OpenAI direct access too? Add `OPENAI_API_KEY` and set `ALLOW_OPENAI_ROUTING=true`.
 
-1. **Dashboard** (recommended) — Paste your OpenRouter key in Settings > Provider Keys
-2. **Environment variables** — Set `OPENROUTER_API_KEY` in `.env`
+## For Developers
 
-Keys are stored in `.clawhelm/settings.json` and picked up immediately without restart.
+ClawHelm exposes an **OpenAI-compatible API** at `/v1/chat/completions` — point any OpenAI SDK at it and get intelligent routing for free.
 
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENROUTER_API_KEY` | — | OpenRouter API key |
-| `OPENAI_API_KEY` | — | OpenAI API key (optional) |
-| `ALLOW_OPENROUTER_ROUTING` | `true` | Enable OpenRouter provider |
-| `ALLOW_OPENAI_ROUTING` | `false` | Enable OpenAI direct provider |
-| `DATABASE_URL` | `sqlite:///clawhelm.db` | Database connection string |
-| `ENV_MODE` | `local` | `local` or `cloud` |
-| `ENABLE_CLOUD_MODE` | `false` | Enable Stripe + OAuth features |
-| `STRIPE_SECRET_KEY` | — | Stripe key (cloud mode only) |
-| `STRIPE_PRICE_ID` | — | Stripe price ID (cloud mode only) |
-
-## Architecture
-
-```
-Browser  -->  React Frontend (Vite)
-                    |
-                    v
-              FastAPI Backend
-                    |
-          +---------+---------+
-          |                   |
-    OpenRouter API      OpenAI API
-     (350+ models)     (direct access)
-          |                   |
-          +----> SQLite <-----+
-                (logs, stats, sessions)
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "auto", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-**Scoring formula:** `score = success_rate * 0.4 + (1/latency) * 0.35 + (1/cost) * 0.25`
-
-Cold-start models use pricing metadata instead of neutral defaults. Free models get a +0.1 routing bonus. 10% of requests explore non-top models to discover better options.
-
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/v1/chat/completions` | OpenAI-compatible chat proxy |
-| `GET` | `/chat/models` | Ranked model list for UI |
-| `GET` | `/stats` | Performance metrics and model leaderboard |
-| `GET` | `/refresh-models` | Sync models from OpenRouter |
-| `GET` | `/health` | Backend health check |
-| `POST` | `/chat/sessions` | Create/update chat session |
-| `GET` | `/chat/sessions` | List user sessions |
-
-## Project Structure
-
-```
-clawhelm/
-  app/
-    main.py              # FastAPI app and endpoints
-    proxy.py             # Request forwarding and fallback chain
-    router.py            # Model scoring, ranking, route decisions
-    scoring.py           # Composite scoring formula
-    providers.py         # Provider registry (OpenRouter, OpenAI)
-    models_registry.py   # Model catalog with metadata
-    costs.py             # Cost estimation from real pricing
-    settings.py          # Persistent settings store
-    db.py                # SQLite logging and stats
-    models.py            # Pydantic response models
-  frontend/
-    src/
-      App.jsx            # App shell, auth, routing
-      components/
-        Chat.jsx         # Chat thread and composer
-        Message.jsx      # Markdown rendering with syntax highlighting
-        ModelSelector.jsx # Tile-based model popup
-        ModelDashboard.jsx # Performance stats panel
-        Sidebar.jsx      # Session history sidebar
-      pages/
-        Settings.jsx     # Settings and provider keys
-        Models.jsx       # Full model catalog with filters
-      styles.css         # All styles (dark theme, blue accent)
-```
+Full [API Reference](https://github.com/YugantM/clawhelm/wiki/API-Reference) in the wiki.
 
 ## Contributing
 
 1. Fork the repo
-2. Create a feature branch (`git checkout -b feat/my-feature`)
-3. Commit your changes
-4. Push and open a PR
+2. Create a feature branch
+3. Open a PR
 
 ## License
 
