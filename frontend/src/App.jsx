@@ -236,11 +236,11 @@ export default function App() {
 
   useEffect(() => {
     function handleKeyDown(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === "t") {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "t") {
         e.preventDefault();
         handleNewChat();
       }
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "a") {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "a") {
         e.preventDefault();
         setShowAdmin(!showAdmin);
       }
