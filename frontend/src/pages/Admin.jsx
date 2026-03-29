@@ -126,6 +126,7 @@ export default function Admin() {
                 <tr>
                   <th>#</th>
                   <th>Model</th>
+                  <th>Provider</th>
                   <th>Free</th>
                   <th>Context</th>
                   <th>Live Req</th>
@@ -138,6 +139,7 @@ export default function Admin() {
                 {models.map((m, i) => {
                   const live = statsMap[m.model_id];
                   const bench = benchMap[m.model_id];
+                  const benchLatency = bench?.avg_latency ?? null;
                   return (
                     <tr key={i} style={{ opacity: live ? 1 : 0.6 }}>
                       <td style={{ color: "var(--text-tertiary)", fontSize: "0.75rem" }}>{m.rank || "—"}</td>
@@ -146,6 +148,7 @@ export default function Admin() {
                         {bench?.successes > 0 && <span style={{ color: "#3b82f6", marginRight: 4 }}>●</span>}
                         {m.model_id}
                       </td>
+                      <td style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>{m.provider || "—"}</td>
                       <td>{m.is_free ? <span style={{ color: "#22c55e" }}>free</span> : "—"}</td>
                       <td style={{ fontSize: "0.75rem" }}>{m.context_length ? `${Math.round(m.context_length/1000)}k` : "—"}</td>
                       <td>{live ? live.sample_count : "—"}</td>
@@ -153,7 +156,9 @@ export default function Admin() {
                         {live ? `${live.success_rate}%` : "no data"}
                       </td>
                       <td>{live ? `${live.avg_latency.toFixed(2)}s` : "—"}</td>
-                      <td style={{ color: "#3b82f6" }}>{bench?.avg_latency ? `${bench.avg_latency.toFixed(2)}s` : bench?.successes === 0 ? <span style={{ color: "#ef4444" }}>failed</span> : "—"}</td>
+                      <td style={{ color: "#3b82f6" }}>
+                        {benchLatency !== null ? `${benchLatency.toFixed(2)}s` : bench?.successes === 0 ? <span style={{ color: "#ef4444" }}>failed</span> : "—"}
+                      </td>
                     </tr>
                   );
                 })}
