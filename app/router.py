@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from .db import db
 from .models_registry import ModelRegistry, model_registry
 from .performance import get_model_stats
 from .providers import provider_registry
@@ -51,7 +52,6 @@ def _get_cached_score(model_id: str, model_dict: dict[str, Any]) -> float:
         if now - cached_at < SCORE_CACHE_TTL:
             return cached_score
 
-    from .db import db
     stats = get_model_stats(model_id)
     benchmark_latency = db.get_benchmark_latency(model_id)
     computed_score = score_model(model_dict, stats, benchmark_latency=benchmark_latency)
@@ -139,7 +139,8 @@ def get_direct_route_decision(model_id: str, registry: ModelRegistry = model_reg
         "context_length": model.context_length,
     }
     stats = get_model_stats(model_id)
-    candidate_score = score_model(candidate, stats)
+    benchmark_latency = db.get_benchmark_latency(model_id)
+    candidate_score = score_model(candidate, stats, benchmark_latency=benchmark_latency)
     return _build_decision(candidate, "manual selection", candidate_score)
 
 
