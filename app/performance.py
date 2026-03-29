@@ -24,6 +24,9 @@ def _connect() -> sqlite3.Connection:
     return connection
 
 
+STATS_WINDOW_DAYS = 30  # only use recent logs for routing scores
+
+
 def get_model_stats(model_id: str) -> dict[str, float | int]:
     with _connect() as connection:
         row = connection.execute(
@@ -34,9 +37,10 @@ def get_model_stats(model_id: str) -> dict[str, float | int]:
                 AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN latency END) AS avg_latency,
                 AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN estimated_cost END) AS avg_cost
             FROM logs
-            WHERE actual_model = ? OR selected_model = ?
+            WHERE (actual_model = ? OR selected_model = ?)
+              AND timestamp > datetime('now', ? || ' days')
             """,
-            (model_id, model_id),
+            (model_id, model_id, f"-{STATS_WINDOW_DAYS}"),
         ).fetchone()
 
     total_count = row["total_count"] if row and row["total_count"] else 0

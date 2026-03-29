@@ -794,11 +794,11 @@ class Database:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def get_model_stats_summary(self) -> list[dict]:
-        """Summary stats for each model from live traffic."""
+    def get_model_stats_summary(self, days: int = 30) -> list[dict]:
+        """Summary stats for each model from live traffic, windowed to recent logs."""
         with self._connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     selected_model as model_id,
                     COUNT(*) as sample_count,
@@ -808,6 +808,7 @@ class Database:
                     MIN(timestamp) as first_seen,
                     MAX(timestamp) as last_seen
                 FROM logs
+                WHERE timestamp > datetime('now', '-{days} days')
                 GROUP BY selected_model
                 ORDER BY sample_count DESC
                 """
