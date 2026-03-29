@@ -25,7 +25,7 @@ class SettingsStore:
         self._lock = asyncio.Lock()
 
     def _default_settings(self) -> dict[str, Any]:
-        return {"providers": {"openrouter": {"api_key": ""}, "openai": {"api_key": ""}, "groq": {"api_key": ""}}}
+        return {"providers": {"openrouter": {"api_key": ""}, "openai": {"api_key": ""}, "groq": {"api_key": ""}, "google": {"api_key": ""}}}
 
     def _read_sync(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -43,6 +43,7 @@ class SettingsStore:
         providers.setdefault("openrouter", {"api_key": ""})
         providers.setdefault("openai", {"api_key": ""})
         providers.setdefault("groq", {"api_key": ""})
+        providers.setdefault("google", {"api_key": ""})
         return data
 
     def _write_sync(self, payload: dict[str, Any]) -> None:

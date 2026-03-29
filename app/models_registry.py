@@ -73,6 +73,8 @@ class ModelRegistry:
             return "openrouter"
         if model_id.startswith("groq/"):
             return "groq"
+        if model_id.startswith("google/") or model_id.startswith("gemini-"):
+            return "google"
         return "openai"
 
     def _register_model(
@@ -172,6 +174,8 @@ class ModelRegistry:
                     await self._fetch_openrouter_models(client)
                 elif config.models_path and config.name == "groq":
                     await self._fetch_groq_models(client)
+                elif config.models_path and config.name == "google":
+                    await self._fetch_google_models(client)
             self._last_refresh_at = datetime.now(timezone.utc)
             return self.snapshot()
 
@@ -239,6 +243,42 @@ class ModelRegistry:
                 source="fetched",
                 context_length=context_length,
                 display_name=str(item.get("id") or model_id),
+            )
+
+    async def _fetch_google_models(self, client: httpx.AsyncClient) -> None:
+        from .providers import provider_registry
+        api_key = provider_registry.get_api_key("google")
+        if not api_key:
+            return
+
+        base_url = provider_registry.get_base_url("google")
+        try:
+            response = await client.get(
+                f"{base_url}/models",
+                headers={"authorization": f"Bearer {api_key}"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            return
+        # Google returns {"data": [...]} in OpenAI-compat mode
+        data = payload.get("data", []) if isinstance(payload, dict) else []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            model_id = item.get("id")
+            if not isinstance(model_id, str):
+                continue
+            # Skip embedding/vision-only models
+            if any(skip in model_id for skip in ("embedding", "aqa", "imagen")):
+                continue
+            self._register_model(
+                model_id,
+                provider="google",
+                is_free=False,
+                source="fetched",
+                context_length=int(item.get("context_window") or 32768),
+                display_name=model_id,
             )
 
     @staticmethod

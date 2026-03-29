@@ -97,3 +97,15 @@ provider_registry.register(ProviderConfig(
     enabled_default=True,
     supports_free=False,
 ))
+
+provider_registry.register(ProviderConfig(
+    name="google",
+    base_url_env="GOOGLE_AI_BASE_URL",
+    base_url_default="https://generativelanguage.googleapis.com/v1beta/openai",
+    chat_path="/chat/completions",
+    models_path="/models",
+    api_key_env="GOOGLE_AI_API_KEY",
+    enabled_env="ALLOW_GOOGLE_ROUTING",
+    enabled_default=True,
+    supports_free=False,
+))

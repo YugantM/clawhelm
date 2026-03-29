@@ -1165,6 +1165,38 @@ button, textarea, input, select { font: inherit; }
   border-color: var(--accent);
   color: #fff;
 }
+.admin-search {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  padding: 5px 10px;
+  width: 200px;
+  outline: none;
+}
+.admin-search:focus { border-color: var(--accent); }
+.admin-select {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  padding: 5px 8px;
+  outline: none;
+  cursor: pointer;
+}
+.admin-refresh-btn {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 4px 8px;
+}
+.admin-refresh-btn:hover { color: var(--text-primary); }
 @media (max-width: 640px) {
   .admin-stats-row { grid-template-columns: repeat(2, 1fr); }
 }

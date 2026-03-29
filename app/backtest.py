@@ -107,7 +107,13 @@ async def run_backtest(client: httpx.AsyncClient, run_id: str | None = None) -> 
         return _current_run["run_id"]
 
     run_id = run_id or str(uuid.uuid4())[:12]
-    models = model_registry.get_available_models()[:MAX_MODELS_PER_RUN]
+    all_models = model_registry.get_available_models()
+    # Only benchmark free models to avoid spending credits
+    models = [m for m in all_models if m.get("is_free")][:MAX_MODELS_PER_RUN]
+    if not models:
+        logger.info("Backtest %s: no free models available, skipping", run_id)
+        _current_run.update(run_id=run_id, status="completed", last_completed_at=time.time())
+        return run_id
     total_tasks = len(models) * len(BENCHMARK_PROMPTS)
 
     _current_run.update(
