@@ -258,6 +258,15 @@ async def clear_logs_before(before: str = Query(..., description="ISO date e.g. 
     return {"deleted": deleted, "before": before}
 
 
+@app.delete("/admin/benchmarks/bad-models")
+async def remove_non_chat_benchmark_data():
+    """Remove benchmark data for known non-chat models (safety classifiers, etc.)."""
+    bad_models = [m for m in ["openai/gpt-oss-safeguard-20b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]]
+    deleted = await asyncio.to_thread(db.delete_benchmark_results_for_models, bad_models)
+    invalidate_score_cache()
+    return {"deleted": deleted, "models": bad_models}
+
+
 # Backtest endpoints
 @app.post("/backtest/run")
 async def start_backtest(request: Request):

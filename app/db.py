@@ -806,6 +806,19 @@ class Database:
             connection.commit()
             return cur.rowcount
 
+    def delete_benchmark_results_for_models(self, model_ids: list[str]) -> int:
+        """Remove benchmark results for specific models (e.g. non-chat models)."""
+        if not model_ids:
+            return 0
+        placeholders = ",".join("?" * len(model_ids))
+        with self._connect() as connection:
+            cur = connection.execute(
+                f"DELETE FROM benchmark_results WHERE model_id IN ({placeholders})",
+                model_ids,
+            )
+            connection.commit()
+            return cur.rowcount
+
     def get_recent_logs(self, limit: int = 20) -> list[dict]:
         """Last N routing logs."""
         with self._connect() as connection:

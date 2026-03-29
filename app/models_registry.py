@@ -228,12 +228,16 @@ class ModelRegistry:
             payload = response.json()
         except Exception:
             return
+        # Non-chat models to exclude (safety classifiers, tools, guard models)
+        GROQ_SKIP = ("guard", "safeguard", "whisper", "tool-use", "vision")
         data = payload.get("data", []) if isinstance(payload, dict) else []
         for item in data:
             if not isinstance(item, dict):
                 continue
             model_id = item.get("id")
             if not isinstance(model_id, str):
+                continue
+            if any(skip in model_id.lower() for skip in GROQ_SKIP):
                 continue
             context_length = int(item.get("context_window") or 4096)
             self._register_model(
