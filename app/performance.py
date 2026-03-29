@@ -33,17 +33,23 @@ def get_model_stats(model_id: str) -> dict[str, float | int]:
             """
             SELECT
                 COUNT(*) AS total_count,
-                SUM(CASE WHEN status_code >= 200 AND status_code < 400
-                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN 1 ELSE 0 END) AS success_count,
-                AVG(CASE WHEN status_code >= 200 AND status_code < 400
-                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN latency END) AS avg_latency,
-                AVG(CASE WHEN status_code >= 200 AND status_code < 400
-                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN estimated_cost END) AS avg_cost
-            FROM logs
-            WHERE selected_model = ?
-              AND timestamp > datetime('now', ? || ' days')
+                SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END) AS success_count,
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN latency END) AS avg_latency,
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN estimated_cost END) AS avg_cost
+            FROM (
+                -- Model responded as primary (selected, no fallback triggered)
+                SELECT latency, status_code, estimated_cost FROM logs
+                WHERE selected_model = ?
+                  AND (fallback_used = 0 OR fallback_used IS NULL)
+                  AND timestamp > datetime('now', ? || ' days')
+                UNION ALL
+                -- Model responded as fallback (saved a failed primary)
+                SELECT latency, status_code, estimated_cost FROM logs
+                WHERE actual_model = ? AND fallback_used = 1
+                  AND timestamp > datetime('now', ? || ' days')
+            )
             """,
-            (model_id, f"-{STATS_WINDOW_DAYS}"),
+            (model_id, f"-{STATS_WINDOW_DAYS}", model_id, f"-{STATS_WINDOW_DAYS}"),
         ).fetchone()
 
     total_count = row["total_count"] if row and row["total_count"] else 0
@@ -65,17 +71,21 @@ def get_all_model_stats(days: int = STATS_WINDOW_DAYS) -> dict[str, dict]:
         rows = connection.execute(
             f"""
             SELECT
-                selected_model AS model_id,
+                model_id,
                 COUNT(*) AS total_count,
-                SUM(CASE WHEN status_code >= 200 AND status_code < 400
-                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN 1 ELSE 0 END) AS success_count,
-                AVG(CASE WHEN status_code >= 200 AND status_code < 400
-                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN latency END) AS avg_latency,
-                AVG(CASE WHEN status_code >= 200 AND status_code < 400
-                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN estimated_cost END) AS avg_cost
-            FROM logs
-            WHERE timestamp > datetime('now', '-{days} days')
-            GROUP BY selected_model
+                SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END) AS success_count,
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN latency END) AS avg_latency,
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN estimated_cost END) AS avg_cost
+            FROM (
+                SELECT selected_model AS model_id, latency, status_code, estimated_cost FROM logs
+                WHERE (fallback_used = 0 OR fallback_used IS NULL)
+                  AND timestamp > datetime('now', '-{days} days')
+                UNION ALL
+                SELECT actual_model AS model_id, latency, status_code, estimated_cost FROM logs
+                WHERE fallback_used = 1 AND actual_model IS NOT NULL
+                  AND timestamp > datetime('now', '-{days} days')
+            )
+            GROUP BY model_id
             """
         ).fetchall()
     result: dict[str, dict] = {}

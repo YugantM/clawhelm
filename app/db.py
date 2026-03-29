@@ -839,18 +839,25 @@ class Database:
             rows = connection.execute(
                 f"""
                 SELECT
-                    selected_model as model_id,
+                    model_id,
                     COUNT(*) as sample_count,
-                    ROUND(SUM(CASE WHEN status_code < 400 AND (fallback_used = 0 OR fallback_used IS NULL)
-                                   THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as success_rate,
-                    ROUND(AVG(CASE WHEN fallback_used = 0 OR fallback_used IS NULL
-                                   THEN latency END), 3) as avg_latency,
+                    ROUND(SUM(CASE WHEN status_code < 400 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as success_rate,
+                    ROUND(AVG(CASE WHEN status_code < 400 THEN latency END), 3) as avg_latency,
                     ROUND(AVG(estimated_cost), 6) as avg_cost,
-                    MIN(timestamp) as first_seen,
-                    MAX(timestamp) as last_seen
-                FROM logs
-                WHERE timestamp > datetime('now', '-{days} days')
-                GROUP BY selected_model
+                    MIN(ts) as first_seen,
+                    MAX(ts) as last_seen
+                FROM (
+                    SELECT selected_model AS model_id, latency, status_code, estimated_cost, timestamp AS ts
+                    FROM logs
+                    WHERE (fallback_used = 0 OR fallback_used IS NULL)
+                      AND timestamp > datetime('now', '-{days} days')
+                    UNION ALL
+                    SELECT actual_model AS model_id, latency, status_code, estimated_cost, timestamp AS ts
+                    FROM logs
+                    WHERE fallback_used = 1 AND actual_model IS NOT NULL
+                      AND timestamp > datetime('now', '-{days} days')
+                )
+                GROUP BY model_id
                 ORDER BY sample_count DESC
                 """
             ).fetchall()
