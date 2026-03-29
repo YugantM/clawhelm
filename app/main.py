@@ -167,10 +167,20 @@ async def get_chat_models():
         if entry.get("is_free"):
             s += FREE_BONUS
         entry["_score"] = s
-        entry["_speed_score"] = (1.0 / max(bench_lat, 0.1) / 10.0) if bench_lat else (
-            1.0 / max(float(stats.get("avg_latency") or 1.0), 0.1) / 10.0
-            if stats.get("sample_count", 0) > 0 else 0.5
-        )
+        # Use the same blended latency that score_model() uses, so speed rank matches routing
+        _sample_count = int(stats.get("sample_count") or 0)
+        _live_lat = float(stats.get("avg_latency") or 1.0)
+        if _sample_count >= 10:
+            _eff_lat = _live_lat  # enough live data — ignore benchmark
+        elif _sample_count > 0 and bench_lat:
+            _w = _sample_count / 10.0
+            _eff_lat = _w * _live_lat + (1 - _w) * bench_lat  # blend
+        elif bench_lat:
+            _eff_lat = bench_lat  # cold-start — benchmark only
+        else:
+            _eff_lat = None
+        entry["_speed_score"] = (1.0 / max(_eff_lat, 0.1) / 10.0) if _eff_lat else 0.5
+        entry["_sample_count"] = _sample_count
         entry["_quality_score"] = float(stats.get("success_rate") or 0.5)
         cost = float(stats.get("avg_cost") or 0.0)
         entry["_cost_score"] = 1.0 if entry.get("is_free") else (0.5 if cost <= 0 else min(1.0 / (cost * 100 + 1), 1.0))
@@ -227,6 +237,7 @@ async def get_chat_models():
             prompt_cost_per_m=round(prompt_cost * 1_000_000, 4) if prompt_cost > 0 else None,
             completion_cost_per_m=round(completion_cost * 1_000_000, 4) if completion_cost > 0 else None,
             description=description,
+            sample_count=m.get("_sample_count", 0),
         ))
 
     return options

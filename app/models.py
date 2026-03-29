@@ -85,6 +85,7 @@ class ChatModelOption(BaseModel):
     prompt_cost_per_m: float | None = None
     completion_cost_per_m: float | None = None
     description: str = ""
+    sample_count: int = 0  # live requests observed; 0 means benchmark-only scoring
 
 
 class UserResponse(BaseModel):
