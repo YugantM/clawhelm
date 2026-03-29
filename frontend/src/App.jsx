@@ -251,21 +251,6 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [showAdmin]);
 
-  async function generateAndSetTitle(sessionId, userMessage, assistantMessage) {
-    try {
-      const titleResponse = await postChat([
-        { role: "user", content: userMessage },
-        { role: "assistant", content: assistantMessage },
-        { role: "user", content: "Generate a short title (3-5 words max) summarizing this conversation. Reply with ONLY the title text, no quotes, no punctuation." },
-      ]);
-      let title = normalizeAssistantContent(titleResponse).trim().replace(/^["']+|["']+$/g, "");
-      if (title && title.length < 80 && title !== "No response received.") {
-        await updateSessionTitle(sessionId, title);
-        setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title } : s)));
-      }
-    } catch {}
-  }
-
   async function handleSend(prompt) {
     if (pendingRef.current) return;
     pendingRef.current = true;
@@ -282,7 +267,8 @@ export default function App() {
     const isNewSession = currentUser && !sessionId;
     if (isNewSession) {
       try {
-        const title = prompt.length > 60 ? prompt.slice(0, 57) + "..." : prompt;
+        const words = prompt.trim().split(/\s+/);
+        const title = words.length > 6 ? words.slice(0, 6).join(" ") + "…" : prompt.trim();
         const session = await createSession(title);
         sessionId = session.id;
         setActiveSessionId(sessionId);
@@ -314,7 +300,6 @@ export default function App() {
 
         if (currentUser && sessionId) {
           try { await addSessionMessage(sessionId, "assistant", content, meta); } catch {}
-          if (isNewSession) generateAndSetTitle(sessionId, prompt, content);
         }
       }
     } catch (err) {
