@@ -431,7 +431,7 @@ export default function App() {
 
         <main className="app-main">
           {showAdmin && currentUser?.email?.toLowerCase() === "hadiyalyugant@gmail.com" ? (
-            <Admin />
+            <div style={{ flex: 1, overflowY: "auto" }}><Admin /></div>
           ) : (
             <Chat
               messages={messages}
