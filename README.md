@@ -1,50 +1,40 @@
 # ClawHelm
 
-![ClawHelm logo](frontend/public/clawhelm-logo-dark.svg)
+An intelligent AI model router that picks the fastest, cheapest, most reliable model for every query.
 
-[![License](https://img.shields.io/github/license/YugantM/clawhelm)](LICENSE)
-[![Pages](https://img.shields.io/github/actions/workflow/status/YugantM/clawhelm/deploy-pages.yml?branch=main&label=pages)](https://github.com/YugantM/clawhelm/actions/workflows/deploy-pages.yml)
-[![Live Demo](https://img.shields.io/badge/demo-live-22c55e)](https://yugantm.github.io/clawhelm/)
-
-### Stop choosing AI models. Let ClawHelm choose for you.
-
-ClawHelm connects to **350+ AI models** and automatically picks the best one for every message you send — the fastest, cheapest, and most reliable. No setup, no guesswork.
-
-[Try the Live Demo](https://yugantm.github.io/clawhelm/) · [User Guide](https://github.com/YugantM/clawhelm/wiki)
+**No model menus. No configuration. Just a chat that always gives you the best answer — from 350+ models.**
 
 ---
 
-## Why ClawHelm?
+## How It Works
 
-Every AI provider has dozens of models. Some are fast, some are cheap, some are smart. Picking the right one for every question is exhausting.
+ClawHelm scores every model on **speed**, **quality**, and **cost** from real usage:
 
-**ClawHelm does it for you.** It learns which models perform best and routes every query to the optimal choice — automatically. If a model fails, it instantly retries with the next best option. You just chat.
+- **Speed (45%)** — Latency from live traffic + benchmark tests
+- **Quality (30%)** — Success rate (errors penalize heavily)
+- **Cost (25%)** — Per-token pricing
 
-## What You Get
+The top-scoring model gets your message. If it fails, the next best instantly takes over. Built-in fallback chain ensures you always get an answer.
 
-**Just chat** — Type a question, get the best answer. ClawHelm handles model selection behind the scenes.
+---
 
-**350+ models, one interface** — Access models from OpenRouter and OpenAI through a single clean chat. No switching tabs or accounts.
+## Features
 
-**Beautiful responses** — Code blocks with syntax highlighting and copy buttons, tables, formatted text — all rendered natively.
+- **Adaptive routing** — Learns from each request to pick better models
+- **350+ models** — OpenRouter, OpenAI, and others
+- **Markdown chat** — Code blocks with copy button, formatted responses
+- **Session history** — Save chats, organized by date (signed-in users)
+- **Guest mode** — Temporary storage in browser, no account needed
+- **Speed comparison** — See how fast your selected model is vs. runner-up
+- **Cost tracking** — Know how much each request costs
+- **Fallback chain** — Auto-retry on failure, no stuck requests
+- **OpenAI-compatible API** — Drop-in replacement for any OpenAI SDK
 
-**Pick your own model** — Want control? Browse the full catalog, filter by free/paid, and sort by speed, quality, or cost.
+---
 
-**See what's happening** — Every response shows which model answered and how fast. Full transparency, zero complexity.
+## Quick Start
 
-**Automatic fallback** — If a model goes down mid-conversation, ClawHelm switches to the next best one seamlessly.
-
-**Free models first** — ClawHelm prioritizes free models that deliver great results, so you spend nothing unless you want to.
-
-## Screenshots
-
-| Chat with Markdown | Model Selector |
-|:---:|:---:|
-| ![Chat](docs/screens/chat.png) | ![Models](docs/screens/dashboard.png) |
-
-## Get Started in 60 Seconds
-
-Grab a free [OpenRouter API key](https://openrouter.ai/keys), then:
+### macOS / Linux
 
 ```bash
 git clone https://github.com/YugantM/clawhelm.git
@@ -53,33 +43,74 @@ cd clawhelm
 ./scripts/run_dashboard.sh
 ```
 
-Open [localhost:5173](http://localhost:5173) and start chatting.
+### Windows (PowerShell)
 
-> **Windows?** Use `.\install\install.ps1` in PowerShell instead.
+```powershell
+git clone https://github.com/YugantM/clawhelm.git
+cd clawhelm
+.\install\install.ps1 -openRouterApiKey YOUR_KEY
+.\scripts\run_dashboard.ps1
+```
+
+Get a free OpenRouter key: [openrouter.ai/keys](https://openrouter.ai/keys)
+
+Open [localhost:5173](http://localhost:5173)
+
+---
 
 ## Configuration
 
-Paste your API key in **Settings > Provider Keys** — or set `OPENROUTER_API_KEY` in `.env`. That's it.
+### API Keys
 
-Want OpenAI direct access too? Add `OPENAI_API_KEY` and set `ALLOW_OPENAI_ROUTING=true`.
-
-## For Developers
-
-ClawHelm exposes an **OpenAI-compatible API** at `/v1/chat/completions` — point any OpenAI SDK at it and get intelligent routing for free.
+Set via environment variables or the dashboard:
 
 ```bash
-curl http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "auto", "messages": [{"role": "user", "content": "Hello!"}]}'
+OPENROUTER_API_KEY=your_key_here
+OPENAI_API_KEY=your_key_here  # optional, for OpenAI models
 ```
 
-Full [API Reference](https://github.com/YugantM/clawhelm/wiki/API-Reference) in the wiki.
+Or paste in Settings → API Keys in the UI.
+
+### Environment Variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAWHELM_DB_PATH` | `./clawhelm.db` | SQLite database location |
+| `OPENROUTER_API_KEY` | — | OpenRouter API key |
+| `OPENAI_API_KEY` | — | OpenAI API key (optional) |
+
+---
+
+## Architecture
+
+```
+Frontend (React, Vite) → FastAPI Proxy → Model Router → Provider APIs
+                             ↓
+                         SQLite (stats)
+```
+
+- **Frontend** — Chat UI, session management, markdown rendering
+- **Router** — Scores models, selects best, manages fallback chain
+- **Scoring** — Blends speed/quality/cost from live usage + benchmarks
+- **Database** — Tracks performance metrics per model
+
+---
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/chat/completions` | Chat completion (OpenAI-compatible) |
+| `GET` | `/health` | Backend health check |
+| `GET` | `/stats/{model_id}` | Model performance stats |
+| `POST` | `/backtest/run` | Start benchmark run (admin) |
+| `GET` | `/backtest/status` | Backtest progress (admin) |
+
+---
 
 ## Contributing
 
-1. Fork the repo
-2. Create a feature branch
-3. Open a PR
+Contributions welcome. Submit a PR.
 
 ## License
 
@@ -87,4 +118,4 @@ Full [API Reference](https://github.com/YugantM/clawhelm/wiki/API-Reference) in 
 
 ---
 
-Built by [Harsiddhi Pari](https://github.com/YugantM)
+Built by [YugantM](https://github.com/YugantM)
