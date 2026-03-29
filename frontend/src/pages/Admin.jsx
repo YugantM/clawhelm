@@ -188,8 +188,19 @@ export default function Admin() {
           let av, bv;
           const la = statsMap[a.model_id], lb = statsMap[b.model_id];
           const ba = benchMap[a.model_id], bb = benchMap[b.model_id];
+          // For rank sort: tier by data quality first (live > bench pass > rest)
+          if (sort.col === "rank" || sort.col === undefined) {
+            const aTier = la ? 0 : (ba?.successes > 0 ? 1 : 2);
+            const bTier = lb ? 0 : (bb?.successes > 0 ? 1 : 2);
+            if (aTier !== bTier) return sort.dir === "asc" ? aTier - bTier : bTier - aTier;
+            // Within same tier: sort by latency (live latency for tier 0, bench latency for tier 1)
+            av = aTier === 0 ? (la?.avg_latency ?? 999) : (ba?.avg_latency ?? 999);
+            bv = bTier === 0 ? (lb?.avg_latency ?? 999) : (bb?.avg_latency ?? 999);
+            if (av < bv) return sort.dir === "asc" ? -1 : 1;
+            if (av > bv) return sort.dir === "asc" ? 1 : -1;
+            return 0;
+          }
           switch (sort.col) {
-            case "rank": av = a.rank || 999; bv = b.rank || 999; break;
             case "model": av = a.model_id; bv = b.model_id; break;
             case "provider": av = a.provider || ""; bv = b.provider || ""; break;
             case "context": av = a.context_length || 0; bv = b.context_length || 0; break;
@@ -251,9 +262,10 @@ export default function Admin() {
                   const live = statsMap[m.model_id];
                   const bench = benchMap[m.model_id];
                   const benchLatency = bench?.avg_latency ?? null;
+                  const hasUsefulData = live || (bench && bench.successes > 0);
                   return (
                     <tr key={i} style={{ opacity: live ? 1 : 0.6 }}>
-                      <td style={{ color: "var(--text-tertiary)", fontSize: "0.75rem" }}>{m.rank || "—"}</td>
+                      <td style={{ color: "var(--text-tertiary)", fontSize: "0.75rem" }}>{hasUsefulData ? i + 1 : "—"}</td>
                       <td style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
                         {live && <span style={{ color: "#22c55e", marginRight: 4 }}>●</span>}
                         {bench?.successes > 0 && <span style={{ color: "#3b82f6", marginRight: 4 }}>●</span>}
