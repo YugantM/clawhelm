@@ -24,9 +24,9 @@ export default function Admin() {
     return () => clearInterval(interval);
   }, []);
 
-  if (loading) return <div className="admin-page">Loading...</div>;
-  if (error) return <div className="admin-page error">Error: {error}</div>;
-  if (!dashboard) return <div className="admin-page">No data</div>;
+  if (loading) return <div className="admin-page">Loading dashboard...</div>;
+  if (error) return <div className="admin-page error">Error: {error} (waiting for backend...)</div>;
+  if (!dashboard) return <div className="admin-page">No data available</div>;
 
   const { health, backtest_status, recent_logs, model_stats, benchmark_results } = dashboard;
 
