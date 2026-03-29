@@ -6,9 +6,9 @@ from typing import Any
 NEUTRAL_SCORE = 0.5
 SMALL_COST_VALUE = 0.0001
 
-# Weights: quality most important, speed prioritized over cost
-QUALITY_WEIGHT = 0.4
-SPEED_WEIGHT = 0.35
+# Weights: speed most important, then quality, then cost
+QUALITY_WEIGHT = 0.3
+SPEED_WEIGHT = 0.45
 COST_WEIGHT = 0.25
 
 # Quality floor: don't route to consistently broken models
@@ -23,8 +23,11 @@ def cold_start_score(model: dict[str, Any], *, benchmark_latency: float | None =
     context_length = int(model.get("context_length", 4096))
 
     # Cost component: cheaper = higher score
-    if prompt_cost <= 0:
+    # Use is_free flag as ground truth; prompt_cost=0 without is_free means no data
+    if is_free:
         cost_score = 1.0
+    elif prompt_cost <= 0:
+        cost_score = 0.5  # no pricing data, neutral
     else:
         cost_per_million = prompt_cost * 1_000_000
         cost_score = min(1.0 / max(cost_per_million, 0.01), 1.0)
@@ -55,11 +58,11 @@ def score_model(
     *,
     benchmark_latency: float | None = None,
 ) -> float:
-    sample_count = int(stats.get("sample_count", 0))
+    sample_count = int(stats.get("sample_count") or 0)
     if sample_count == 0:
         return cold_start_score(model, benchmark_latency=benchmark_latency)
 
-    success_rate = float(stats.get("success_rate", NEUTRAL_SCORE))
+    success_rate = float(stats.get("success_rate") or NEUTRAL_SCORE)
 
     # Quality floor: don't route to consistently broken models
     if sample_count >= QUALITY_FLOOR_MIN_SAMPLES and success_rate < QUALITY_FLOOR_THRESHOLD:
@@ -69,7 +72,7 @@ def score_model(
     if success_rate == 0.0:
         return cold_start_score(model, benchmark_latency=benchmark_latency) * 0.5
 
-    live_latency = max(float(stats.get("avg_latency", 1.0)), 0.001)
+    live_latency = max(float(stats.get("avg_latency") or 1.0), 0.001)
 
     # Blend benchmark and live latency for models with few samples
     if benchmark_latency is not None and benchmark_latency > 0 and sample_count < 10:
@@ -78,11 +81,27 @@ def score_model(
     else:
         latency = live_latency
 
-    cost = max(float(stats.get("avg_cost", 0.0)), 0.0)
+    cost = max(float(stats.get("avg_cost") or 0.0), 0.0)
+    is_free = bool(model.get("is_free", False))
+
+    # Normalize speed to 0-1: cap at 10 req/s (latency 0.1s)
+    speed_score = min(1.0 / max(latency, 0.1) / 10.0, 1.0)
+
+    # Normalize cost to 0-1:
+    #   - confirmed free model → 1.0
+    #   - cost=0 but not flagged free → no cost data, use neutral 0.5
+    #   - paid → inversely proportional to cost
+    if is_free:
+        cost_score = 1.0
+    elif cost <= 0:
+        cost_score = 0.5  # no cost data tracked, don't reward as free
+    else:
+        cost_score = min(1.0 / (cost * 100 + 1), 1.0)
+
     score = (
         success_rate * QUALITY_WEIGHT
-        + (1 / latency) * SPEED_WEIGHT
-        + (1 / (cost if cost > 0 else SMALL_COST_VALUE)) * COST_WEIGHT
+        + speed_score * SPEED_WEIGHT
+        + cost_score * COST_WEIGHT
     )
     return round(score, 6)
 
@@ -130,10 +149,17 @@ def get_score_components(stats: dict[str, float | int], model: dict[str, Any] | 
             "score": cs,
         }
 
-    avg_latency = max(float(stats.get("avg_latency", 1.0)), 0.001)
-    avg_cost = max(float(stats.get("avg_cost", 0.0)), 0.0)
-    latency_score = round(1 / avg_latency, 6)
-    cost_score = round(1 / (avg_cost if avg_cost > 0 else SMALL_COST_VALUE), 6)
+    avg_latency = max(float(stats.get("avg_latency") or 1.0), 0.001)
+    avg_cost = max(float(stats.get("avg_cost") or 0.0), 0.0)
+    is_free = bool((model or {}).get("is_free", False))
+    latency_score = round(min(1.0 / max(avg_latency, 0.1) / 10.0, 1.0), 6)
+    if is_free:
+        cost_score = 1.0
+    elif avg_cost <= 0:
+        cost_score = 0.5
+    else:
+        cost_score = min(1.0 / (avg_cost * 100 + 1), 1.0)
+    cost_score = round(cost_score, 6)
     return {
         "success_rate": round(float(stats.get("success_rate", NEUTRAL_SCORE)), 6),
         "avg_latency": avg_latency,

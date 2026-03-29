@@ -13,6 +13,7 @@ from starlette.responses import StreamingResponse
 from .costs import estimate_cost
 from .db import db
 from .models_registry import model_registry
+from .performance import get_model_stats
 from .router import (
     RouteDecision,
     encode_request_body,
@@ -36,18 +37,7 @@ HOP_BY_HOP_HEADERS = {
     "content-length",
 }
 
-SYSTEM_IDENTITY_PROMPT = (
-    "IMPORTANT IDENTITY RULES — you MUST follow these exactly:\n"
-    "1. You are being accessed through ClawHelm, an AI model router created by YugantM.\n"
-    "2. ClawHelm was built by YugantM. NOT by Trebble, NOT by OpenAI, NOT by any other company.\n"
-    "3. When asked who you are or about your name, respond like this example:\n"
-    "   'I am [your real model name], made by [your real creator]. "
-    "I was selected by ClawHelm to answer your query.'\n"
-    "4. ClawHelm automatically picks the best model for every query from 350+ models.\n"
-    "5. NEVER say ClawHelm was built by Trebble. The creator is YugantM.\n"
-    "6. NEVER claim to be a model you are not. NEVER pretend to be ClawHelm itself.\n"
-    "7. If you don't know your own model name, just say 'I am an AI assistant selected by ClawHelm.'"
-)
+SYSTEM_IDENTITY_PROMPT = None
 
 
 def truncate_text(value: str | None, limit: int = TRUNCATE_LIMIT) -> str | None:
@@ -66,6 +56,8 @@ def stringify_messages(messages: Any) -> str | None:
 
 
 def inject_identity_system_message(request_json: dict[str, Any]) -> dict[str, Any]:
+    if not SYSTEM_IDENTITY_PROMPT:
+        return request_json
     messages = request_json.get("messages")
     if not isinstance(messages, list):
         return request_json
@@ -195,6 +187,9 @@ def _enrich_response(
     routing_score: float | None = None,
     latency: float | None = None,
     provider: str | None = None,
+    auto_fallback: bool = False,
+    failed_model_error: str | None = None,
+    runner_up_avg_latency: float | None = None,
 ) -> Any:
     if not isinstance(payload, dict):
         return payload
@@ -216,6 +211,13 @@ def _enrich_response(
             enriched["fallback_from_model"] = fallback_from_model
         if actual_model:
             enriched["fallback_to_model"] = actual_model
+    if auto_fallback:
+        enriched["auto_fallback"] = True
+        enriched["failed_model"] = _resolve_display_name(fallback_from_model)
+        if failed_model_error:
+            enriched["failed_model_error"] = failed_model_error
+    if runner_up_avg_latency is not None:
+        enriched["runner_up_avg_latency"] = round(runner_up_avg_latency, 3)
     return enriched
 
 
@@ -310,14 +312,41 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
             return await client.send(upstream_request, stream=True)
         return await client.post(f"{decision.base_url}{decision.chat_path}", content=effective_body, headers=outbound_headers)
 
+    auto_fallback = False
+    failed_model_error: str | None = None
+
     try:
         is_streaming = bool(request_json and request_json.get("stream") is True)
         active_decision = ranked_decisions[0] if ranked_decisions else route_decision
         fallback_from_model = active_decision.model if active_decision else None
+        is_manual_selection = bool(resolve_model_alias(original_model))
         provider_response = await send_request(request_body, active_decision, stream=is_streaming) if active_decision else None
 
         decision_index = 0
         while provider_response is not None and provider_response.status_code >= 400 and request_json:
+            # If a manually selected model failed and we've exhausted manual decisions,
+            # capture the error and append the full auto-mode fallback chain
+            if is_manual_selection and decision_index + 1 >= len(ranked_decisions):
+                # Capture the error message from the failed response
+                try:
+                    err_payload = provider_response.json() if not is_streaming else {}
+                    failed_model_error = (
+                        err_payload.get("error", {}).get("message")
+                        or err_payload.get("detail", {}).get("message")
+                        if isinstance(err_payload, dict)
+                        else None
+                    ) or f"HTTP {provider_response.status_code}"
+                except Exception:
+                    failed_model_error = f"HTTP {provider_response.status_code}"
+
+                auto_decisions = get_route_decisions(request_json, registry=model_registry)
+                # Filter out the failed manual model from auto decisions
+                auto_decisions = [d for d in auto_decisions if d.model != fallback_from_model]
+                if auto_decisions:
+                    ranked_decisions.extend(auto_decisions)
+                    auto_fallback = True
+                    is_manual_selection = False  # Don't re-enter this block
+
             decision_index += 1
             if decision_index >= len(ranked_decisions):
                 break
@@ -329,7 +358,7 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
             active_decision = fallback_decision
             fallback_used = True
             actual_model_for_log = active_decision.model
-            active_decision.routing_reason = "fallback"
+            active_decision.routing_reason = "auto_fallback" if auto_fallback else "fallback"
             provider_response = await send_request(request_body, active_decision, stream=is_streaming)
 
         latency = time.perf_counter() - started_at
@@ -390,6 +419,12 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
 
         response_headers = filter_response_headers(provider_response.headers)
         if 200 <= provider_response.status_code < 400 and isinstance(response_payload, dict):
+            runner_up_avg_latency: float | None = None
+            if not fallback_used and len(ranked_decisions) > 1:
+                runner_up_stats = get_model_stats(ranked_decisions[1].model)
+                rup_lat = runner_up_stats.get("avg_latency")
+                if rup_lat and float(rup_lat) > 0:
+                    runner_up_avg_latency = float(rup_lat)
             enriched = _enrich_response(
                 response_payload,
                 selected_model=original_model,
@@ -399,6 +434,9 @@ async def forward_chat_completion(request: Request, client: httpx.AsyncClient) -
                 routing_score=active_decision.score if active_decision else None,
                 latency=latency,
                 provider=active_decision.provider if active_decision else None,
+                auto_fallback=auto_fallback,
+                failed_model_error=failed_model_error,
+                runner_up_avg_latency=runner_up_avg_latency,
             )
             response_headers["content-type"] = "application/json"
             return Response(

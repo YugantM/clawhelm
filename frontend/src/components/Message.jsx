@@ -24,6 +24,11 @@ function Attribution({ meta }) {
   const latency = formatLatency(meta.latency);
   const fallback = meta.fallback_used;
 
+  const speedRatio =
+    meta.runner_up_avg_latency && meta.latency && meta.latency > 0
+      ? meta.runner_up_avg_latency / meta.latency
+      : null;
+
   const parts = [];
   if (model) parts.push(model);
   if (provider) parts.push(`via ${provider}`);
@@ -35,6 +40,9 @@ function Attribution({ meta }) {
     <span className="attribution">
       {parts.join(" · ")}
       {fallback ? <span className="attribution__fallback"> (fallback)</span> : null}
+      {speedRatio !== null && speedRatio > 1.1 ? (
+        <span className="attribution__speed-badge">⚡ {speedRatio.toFixed(1)}x faster</span>
+      ) : null}
     </span>
   );
 }
@@ -103,6 +111,14 @@ const markdownComponents = {
 };
 
 export default function Message({ role, content, meta }) {
+  if (role === "system") {
+    return (
+      <div className="message message--system">
+        <div className="message__system-notice">{content}</div>
+      </div>
+    );
+  }
+
   return (
     <div className={`message message--${role}`}>
       <div className={`message__bubble message__bubble--${role}`}>

@@ -13,7 +13,7 @@ from .scoring import score_model
 
 OPENROUTER_FREE_ROUTER = "openrouter/free"
 
-FREE_MODEL_BONUS = 0.1
+FREE_MODEL_BONUS = 0.03  # small tie-breaker, not enough to override quality/speed
 EXPLORATION_RATE = 0.10
 SCORE_CACHE_TTL = 60.0
 

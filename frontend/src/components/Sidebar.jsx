@@ -43,18 +43,12 @@ export default function Sidebar({
       <aside className={`sidebar ${isOpen ? "sidebar--open" : ""}`}>
         <div className="sidebar__header">
           <h2 className="sidebar__title">Chats</h2>
-          <button className="sidebar__new-btn" onClick={onNewChat} title="New chat">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <path d="M9 3v12M3 9h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-          </button>
         </div>
 
         <div className="sidebar__sessions">
           {!currentUser ? (
-            <div className="sidebar__guest">
-              <p>Sign in to save and access your chat history across devices.</p>
-              <button className="sidebar__signin-btn" onClick={onSignIn}>Sign in</button>
+            <div className="sidebar__empty">
+              <p>Your conversations will appear here</p>
             </div>
           ) : sessions.length === 0 ? (
             <div className="sidebar__empty">

@@ -3,7 +3,6 @@ import {
   addSessionMessage,
   createSession,
   deleteSession,
-  getChatModels,
   getCurrentUser,
   getHealth,
   getSession,
@@ -16,19 +15,46 @@ import {
 import Chat from "./components/Chat";
 import LoginModal from "./components/LoginModal";
 import Sidebar from "./components/Sidebar";
-import Models from "./pages/Models";
-import Settings from "./pages/Settings";
 
 const HEALTH_POLL_MS = 10000;
 const SESSION_POLL_MS = 15000;
 const SESSION_KEY = "clawhelm_active_session";
-const MODEL_KEY = "clawhelm_selected_model";
+const GUEST_MESSAGES_KEY = "clawhelm_guest_messages";
+
+function saveGuestMessages(messages) {
+  try {
+    const slim = messages.map((m) => ({ id: m.id, role: m.role, content: m.content, meta: m.meta }));
+    localStorage.setItem(GUEST_MESSAGES_KEY, JSON.stringify(slim));
+  } catch {}
+}
+
+function loadGuestMessages() {
+  try {
+    const raw = localStorage.getItem(GUEST_MESSAGES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((m) => createMessage(m.id || `restored-${Date.now()}`, m.role, m.content, m.meta || null));
+  } catch { return []; }
+}
+
+function clearGuestMessages() {
+  try { localStorage.removeItem(GUEST_MESSAGES_KEY); } catch {}
+}
 
 function createMessageId(prefix) {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `${prefix}-${crypto.randomUUID()}`;
   }
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function stripIdentityPrefix(content) {
+  if (typeof content !== "string") return content;
+  // Remove any leading line(s) where the model introduces itself as selected by ClawHelm
+  return content
+    .replace(/^.*?(?:i['']?m|i am|selected by)\s+(?:clawhelm|claw\s*helm)[^\n]*/gim, "")
+    .replace(/^\s+/, "");
 }
 
 function createMessage(id, role, content, meta = null) {
@@ -47,7 +73,6 @@ function normalizeAssistantContent(response) {
     if (text.trim()) return text;
   }
 
-  // Check for error messages last — return null so caller can handle as error
   const errorMessage = response?.error?.message || response?.detail?.error?.message || response?.detail?.message;
   if (typeof errorMessage === "string" && errorMessage.trim()) return null;
 
@@ -57,15 +82,12 @@ function normalizeAssistantContent(response) {
 function extractMeta(response) {
   return {
     actual_model: response?.actual_model || response?.model || null,
-    selected_model: response?.selected_model || null,
     display_name: response?.display_name || null,
     provider: response?.provider || null,
     latency: typeof response?.latency === "number" ? response.latency : null,
-    routing_score: typeof response?.routing_score === "number" ? response.routing_score : null,
     total_tokens: response?.usage?.total_tokens ?? null,
     fallback_used: Boolean(response?.fallback_used),
-    fallback_from_model: response?.fallback_from_model || null,
-    fallback_to_model: response?.fallback_to_model || null,
+    runner_up_avg_latency: typeof response?.runner_up_avg_latency === "number" ? response.runner_up_avg_latency : null,
   };
 }
 
@@ -81,49 +103,26 @@ function restoreMessages(data) {
 }
 
 export default function App() {
-  const iconSrc = `${import.meta.env.BASE_URL}clawhelm-icon.svg`;
   const [messages, setMessages] = useState([]);
   const [pendingChat, setPendingChat] = useState(false);
   const [chatError, setChatError] = useState("");
   const [health, setHealth] = useState(null);
-  const [showSettings, setShowSettings] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [authCheckDone, setAuthCheckDone] = useState(false);
-  const [hasOfflineKey, setHasOfflineKey] = useState(false);
   const [authError, setAuthError] = useState("");
 
-  // Sidebar & session state — restore activeSessionId from localStorage
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(() => {
     try { return localStorage.getItem(SESSION_KEY) || null; } catch { return null; }
   });
-  const [loadingSessions, setLoadingSessions] = useState(false);
-
-  // Model selector state
-  const [chatModels, setChatModels] = useState([]);
-  const [selectedModel, setSelectedModel] = useState(() => {
-    try { return localStorage.getItem(MODEL_KEY) || "auto"; } catch { return "auto"; }
-  });
-  const [showModelsPage, setShowModelsPage] = useState(false);
 
   const pendingRef = useRef(false);
   const messagesRef = useRef([]);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
-  // Fetch available models on mount
-  useEffect(() => {
-    getChatModels().then(setChatModels).catch(() => {});
-  }, []);
-
-  // Persist selectedModel to localStorage
-  useEffect(() => {
-    try { localStorage.setItem(MODEL_KEY, selectedModel); } catch {}
-  }, [selectedModel]);
-
-  // Persist activeSessionId to localStorage
   useEffect(() => {
     try {
       if (activeSessionId) {
@@ -134,24 +133,18 @@ export default function App() {
     } catch {}
   }, [activeSessionId]);
 
-  // Check authentication on mount — handles both OAuth callback and normal load
   useEffect(() => {
     let active = true;
-
     async function initAuth() {
-      // Step 1: check for OAuth callback params FIRST
       const params = new URLSearchParams(window.location.search);
       const oauthToken = params.get("auth_token");
       if (oauthToken) {
         setAuthToken(oauthToken);
         window.history.replaceState({}, document.title, window.location.pathname);
       } else if (params.has("auth_error")) {
-        const error = params.get("auth_error");
-        if (active) setAuthError(error);
+        if (active) setAuthError(params.get("auth_error"));
         window.history.replaceState({}, document.title, window.location.pathname);
       }
-
-      // Step 2: now check the current user (token is already saved if OAuth)
       try {
         const user = await getCurrentUser();
         if (!active) return;
@@ -159,41 +152,37 @@ export default function App() {
           setCurrentUser(user);
           setShowLoginModal(false);
         } else {
-          const hasKey = localStorage.getItem("openrouter_api_key");
-          setHasOfflineKey(!!hasKey);
-          setShowLoginModal(!hasKey);
+          setShowLoginModal(true);
         }
-      } catch (err) {
-        console.log("Auth check error:", err);
+      } catch {
         if (!active) return;
-        const hasKey = localStorage.getItem("openrouter_api_key");
-        setHasOfflineKey(!!hasKey);
-        setShowLoginModal(!hasKey);
+        setShowLoginModal(true);
       } finally {
         if (active) setAuthCheckDone(true);
       }
     }
-
     initAuth();
     return () => { active = false; };
   }, []);
 
-  // Load sessions when user logs in, and restore active session
+  // Restore guest messages on load when not signed in
   useEffect(() => {
-    if (!currentUser) {
-      setSessions([]);
-      return;
+    if (!authCheckDone) return;
+    if (!currentUser && messages.length === 0) {
+      const restored = loadGuestMessages();
+      if (restored.length > 0) setMessages(restored);
     }
+    if (currentUser) clearGuestMessages();
+  }, [authCheckDone, currentUser]);
 
+  useEffect(() => {
+    if (!currentUser) { setSessions([]); return; }
     let active = true;
     async function loadAndRestore() {
       try {
-        setLoadingSessions(true);
         const list = await getSessions();
         if (!active) return;
         setSessions(list);
-
-        // Restore the active session's messages if we have one saved
         const savedId = activeSessionId;
         if (savedId) {
           const exists = list.some((s) => s.id === savedId);
@@ -202,37 +191,22 @@ export default function App() {
               const data = await getSession(savedId);
               if (active) {
                 const restored = restoreMessages(data);
-                if (restored.length > 0) {
-                  setMessages(restored);
-                }
+                if (restored.length > 0) setMessages(restored);
               }
-            } catch (err) {
-              console.error("Failed to restore session:", err);
-              if (active) setActiveSessionId(null);
-            }
+            } catch { if (active) setActiveSessionId(null); }
           } else {
-            // Session no longer exists
             if (active) setActiveSessionId(null);
           }
         }
-      } catch (err) {
-        console.error("Failed to load sessions:", err);
-      } finally {
-        if (active) setLoadingSessions(false);
-      }
+      } catch {}
     }
-
     loadAndRestore();
     return () => { active = false; };
   }, [currentUser]);
 
-  // Refresh sessions list periodically and when sidebar opens
   const refreshSessions = useCallback(async () => {
     if (!currentUser) return;
-    try {
-      const list = await getSessions();
-      setSessions(list);
-    } catch {}
+    try { setSessions(await getSessions()); } catch {}
   }, [currentUser]);
 
   useEffect(() => {
@@ -241,26 +215,32 @@ export default function App() {
     return () => clearInterval(id);
   }, [currentUser, refreshSessions]);
 
-  // Also refresh when sidebar opens
   useEffect(() => {
-    if (sidebarOpen && currentUser) {
-      refreshSessions();
-    }
+    if (sidebarOpen && currentUser) refreshSessions();
   }, [sidebarOpen, currentUser, refreshSessions]);
 
-  // Poll health to know if backend is up
   useEffect(() => {
     let active = true;
     async function check() {
       try {
         const h = await getHealth();
-        if (!active) return;
-        setHealth(h);
-      } catch { /* backend down — non-fatal */ }
+        if (active) setHealth(h);
+      } catch {}
     }
     check();
     const id = setInterval(() => check().catch(() => {}), HEALTH_POLL_MS);
     return () => { active = false; clearInterval(id); };
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "t") {
+        e.preventDefault();
+        handleNewChat();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   async function generateAndSetTitle(sessionId, userMessage, assistantMessage) {
@@ -275,9 +255,7 @@ export default function App() {
         await updateSessionTitle(sessionId, title);
         setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title } : s)));
       }
-    } catch (err) {
-      console.error("Failed to generate session title:", err);
-    }
+    } catch {}
   }
 
   async function handleSend(prompt) {
@@ -288,10 +266,10 @@ export default function App() {
     const assistantId = createMessageId("a");
     const next = [...messagesRef.current, userMsg];
     setMessages(next);
+    if (!currentUser) saveGuestMessages(next);
     setPendingChat(true);
     setChatError("");
 
-    // Auto-create session for logged-in users on first message
     let sessionId = activeSessionId;
     const isNewSession = currentUser && !sessionId;
     if (isNewSession) {
@@ -301,56 +279,43 @@ export default function App() {
         sessionId = session.id;
         setActiveSessionId(sessionId);
         setSessions((prev) => [session, ...prev]);
-      } catch (err) {
-        console.error("Failed to create session:", err);
-      }
+      } catch {}
     }
 
-    // Save user message to session
     if (currentUser && sessionId) {
-      try {
-        await addSessionMessage(sessionId, "user", prompt);
-      } catch (err) {
-        console.error("Failed to save user message:", err);
-      }
+      try { await addSessionMessage(sessionId, "user", prompt); } catch {}
     }
 
     try {
       const response = await postChat(
         next.map((m) => ({ role: m.role, content: m.content })),
-        { model: selectedModel },
+        { model: "auto" },
       );
       const content = normalizeAssistantContent(response);
       if (!content) {
-        // Provider returned an error (e.g. insufficient credits) — show as error banner, not chat bubble
-        const errMsg = response?.error?.message || response?.detail?.message || "Model returned an empty response.";
+        const errMsg = response?.error?.message || response?.detail?.message || "Something went wrong. Try again.";
         setChatError(errMsg);
       } else {
         const meta = extractMeta(response);
-        setMessages((cur) => [...cur, createMessage(assistantId, "assistant", content, meta)]);
+        const assistantMsg = createMessage(assistantId, "assistant", stripIdentityPrefix(content), meta);
+        setMessages((cur) => {
+          const updated = [...cur, assistantMsg];
+          if (!currentUser) saveGuestMessages(updated);
+          return updated;
+        });
 
-        // Save assistant message to session
         if (currentUser && sessionId) {
-          try {
-            await addSessionMessage(sessionId, "assistant", content, meta);
-          } catch (err) {
-            console.error("Failed to save assistant message:", err);
-          }
-          // Auto-generate title for new sessions
-          if (isNewSession) {
-            generateAndSetTitle(sessionId, prompt, content);
-          }
+          try { await addSessionMessage(sessionId, "assistant", content, meta); } catch {}
+          if (isNewSession) generateAndSetTitle(sessionId, prompt, content);
         }
       }
     } catch (err) {
       const payload = err?.payload || null;
       const content = normalizeAssistantContent(payload);
       if (content) {
-        const meta = extractMeta(payload);
-        setMessages((cur) => [...cur, createMessage(assistantId, "assistant", content, meta)]);
+        setMessages((cur) => [...cur, createMessage(assistantId, "assistant", content, extractMeta(payload))]);
       } else {
-        const errMsg = payload?.error?.message || payload?.detail?.message || err.message || "Request failed";
-        setChatError(errMsg);
+        setChatError(payload?.error?.message || payload?.detail?.message || err.message || "Request failed");
       }
     } finally {
       pendingRef.current = false;
@@ -363,6 +328,7 @@ export default function App() {
     setActiveSessionId(null);
     setChatError("");
     setSidebarOpen(false);
+    clearGuestMessages();
   }
 
   async function handleSelectSession(sessionId) {
@@ -371,31 +337,19 @@ export default function App() {
     setActiveSessionId(sessionId);
     setMessages([]);
     setChatError("");
-    try {
-      const data = await getSession(sessionId);
-      setMessages(restoreMessages(data));
-    } catch (err) {
-      console.error("Failed to load session:", err);
-    }
+    try { setMessages(restoreMessages(await getSession(sessionId))); } catch {}
   }
 
   async function handleDeleteSession(sessionId) {
     try {
       await deleteSession(sessionId);
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-      if (activeSessionId === sessionId) {
-        setActiveSessionId(null);
-        setMessages([]);
-      }
-    } catch (err) {
-      console.error("Failed to delete session:", err);
-    }
+      if (activeSessionId === sessionId) { setActiveSessionId(null); setMessages([]); }
+    } catch {}
   }
 
   async function handleLogout() {
-    try {
-      await apiLogout();
-    } catch {}
+    try { await apiLogout(); } catch {}
     setCurrentUser(null);
     setMessages([]);
     setActiveSessionId(null);
@@ -403,125 +357,78 @@ export default function App() {
     setSidebarOpen(false);
   }
 
-  const backendUp = health?.status === "ok";
-
-  function handleLoginSuccess(user) {
-    if (user) setCurrentUser(user);
-    setShowLoginModal(false);
-    setAuthError("");
-  }
-
   return (
     <div className="app-shell">
-      <Sidebar
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        sessions={sessions}
-        activeSessionId={activeSessionId}
-        onSelectSession={handleSelectSession}
-        onNewChat={handleNewChat}
-        onDeleteSession={handleDeleteSession}
-        currentUser={currentUser}
-        onLogout={handleLogout}
-        onSignIn={() => { setSidebarOpen(false); setShowLoginModal(true); }}
-      />
-
-      <header className="app-header">
-        <div className="app-header__left">
-          <button type="button" className="icon-button sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar" title="Chat history">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-          </button>
-        </div>
-
-        <button type="button" className="new-chat-button" onClick={handleNewChat}>
-          New chat
+      <nav className="left-rail">
+        <button type="button" className={`rail-btn${sidebarOpen ? " rail-btn--active" : ""}`} onClick={() => setSidebarOpen(!sidebarOpen)} title="Chat history" aria-label="Chat history">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <rect x="2" y="3" width="5" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.4"/>
+            <rect x="9" y="3" width="7" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.4"/>
+          </svg>
         </button>
-
-        <div className="app-header__actions">
-          {currentUser ? (
-            <div className="header-user">
-              {currentUser.avatar_url ? (
-                <img className="header-user__avatar" src={currentUser.avatar_url} alt="" />
-              ) : (
-                <div className="header-user__avatar header-user__avatar--placeholder">
-                  {(currentUser.name || currentUser.email || "?")[0].toUpperCase()}
-                </div>
-              )}
-            </div>
-          ) : (
-            <button type="button" className="header-signin-btn" onClick={() => setShowLoginModal(true)}>
-              Sign in
-            </button>
-          )}
-          <span className={`status-dot ${backendUp ? "status-dot--live" : "status-dot--off"}`} title={backendUp ? "Connected" : "Offline"} />
-          <button type="button" className="icon-button" onClick={() => setShowSettings(true)} aria-label="Settings" title="Settings">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <path d="M3 5h4m6 0h4M3 10h10m4 0h0M3 15h2m6 0h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              <circle cx="10" cy="5" r="1.5" stroke="currentColor" strokeWidth="1.5"/>
-              <circle cx="16" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.5"/>
-              <circle cx="8" cy="15" r="1.5" stroke="currentColor" strokeWidth="1.5"/>
+        <button type="button" className="rail-btn" onClick={handleNewChat} title="New chat (Ctrl+T)" aria-label="New chat">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path d="M9 3v12M3 9h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        </button>
+        <div className="rail-spacer" />
+        {currentUser ? (
+          <button type="button" className="rail-btn rail-btn--avatar" onClick={() => setSidebarOpen(!sidebarOpen)} title={currentUser.name || "Profile"}>
+            {currentUser.avatar_url ? (
+              <img className="rail-avatar" src={currentUser.avatar_url} alt="" />
+            ) : (
+              <span className="rail-avatar rail-avatar--placeholder">
+                {(currentUser.name || currentUser.email || "?")[0].toUpperCase()}
+              </span>
+            )}
+          </button>
+        ) : (
+          <button type="button" className="rail-btn" onClick={() => setShowLoginModal(true)} title="Sign in" aria-label="Sign in">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <circle cx="9" cy="7" r="3" stroke="currentColor" strokeWidth="1.4"/>
+              <path d="M3 15.5c0-2.5 2.7-4.5 6-4.5s6 2 6 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
             </svg>
           </button>
-        </div>
-      </header>
+        )}
+      </nav>
 
-      {chatError ? (
-        <div className="error-banner" onClick={() => setChatError("")} role="alert">
-          {chatError}
-          <button className="error-banner__dismiss" onClick={() => setChatError("")} aria-label="Dismiss">&times;</button>
-        </div>
-      ) : null}
-
-      <main className="app-main">
-        <Chat
-          messages={messages}
-          pending={pendingChat}
-          onSend={handleSend}
+      <div className="app-shell__main">
+        <Sidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onSelectSession={handleSelectSession}
+          onNewChat={handleNewChat}
+          onDeleteSession={handleDeleteSession}
           currentUser={currentUser}
-          models={chatModels}
-          selectedModel={selectedModel}
-          onModelChange={setSelectedModel}
-          onShowAllModels={() => setShowModelsPage(true)}
+          onLogout={handleLogout}
+          onSignIn={() => { setSidebarOpen(false); setShowLoginModal(true); }}
         />
-      </main>
 
-      <LoginModal
-        isOpen={showLoginModal}
-        onLoginSuccess={handleLoginSuccess}
-        onSkip={() => setShowLoginModal(false)}
-        authError={authError}
-      />
-
-      {showModelsPage ? (
-        <div className="modal-overlay" onClick={() => setShowModelsPage(false)}>
-          <div className="modal-card modal-card--wide" onClick={(e) => e.stopPropagation()}>
-            <Models
-              models={chatModels}
-              selectedModel={selectedModel}
-              onModelChange={(id) => { setSelectedModel(id); setShowModelsPage(false); }}
-              onClose={() => setShowModelsPage(false)}
-            />
+        {chatError ? (
+          <div className="error-banner" onClick={() => setChatError("")} role="alert">
+            {chatError}
+            <button className="error-banner__dismiss" onClick={() => setChatError("")} aria-label="Dismiss">&times;</button>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {showSettings ? (
-        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-card__header">
-              <h2>Settings</h2>
-              <button type="button" className="icon-button" onClick={() => setShowSettings(false)} aria-label="Close">
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M4 4l10 10M14 4L4 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-              </button>
-            </div>
-            <div className="modal-card__body">
-              <Settings health={health} currentUser={currentUser} />
-            </div>
-          </div>
-        </div>
-      ) : null}
+        <main className="app-main">
+          <Chat
+            messages={messages}
+            pending={pendingChat}
+            onSend={handleSend}
+            currentUser={currentUser}
+          />
+        </main>
+
+        <LoginModal
+          isOpen={showLoginModal}
+          onLoginSuccess={(user) => { if (user) setCurrentUser(user); setShowLoginModal(false); setAuthError(""); }}
+          onSkip={() => setShowLoginModal(false)}
+          authError={authError}
+        />
+      </div>
     </div>
   );
 }
