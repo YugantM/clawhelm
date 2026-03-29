@@ -720,13 +720,23 @@ class Database:
             connection.commit()
 
     def get_benchmark_latency(self, model_id: str) -> float | None:
-        """Average latency from the most recent successful benchmark run for a model."""
+        """Average latency from the most recent benchmark run for a model.
+
+        Returns:
+          - float avg latency  → model was benchmarked and had successes
+          - BENCHMARK_FAIL_LATENCY → model was benchmarked but all prompts failed
+          - None               → model was never benchmarked (scoring falls back to neutral)
+
+        SQLite behaviour: SUM() returns NULL when no rows match, 0 when rows exist
+        but all CASE expressions are 0 — so we distinguish 'never seen' vs 'all failed'.
+        """
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT AVG(latency) as avg_latency
+                SELECT SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successes,
+                       AVG(CASE WHEN status = 'success' THEN latency END) as avg_latency
                 FROM benchmark_results
-                WHERE model_id = ? AND status = 'success' AND latency IS NOT NULL
+                WHERE model_id = ?
                   AND run_id = (
                       SELECT run_id FROM benchmark_results
                       ORDER BY created_at DESC LIMIT 1
@@ -734,24 +744,38 @@ class Database:
                 """,
                 (model_id,),
             ).fetchone()
-            return row["avg_latency"] if row and row["avg_latency"] is not None else None
+            if row is None or row["successes"] is None:
+                return None  # never benchmarked
+            if row["successes"] > 0 and row["avg_latency"] is not None:
+                return float(row["avg_latency"])
+            return self.BENCHMARK_FAIL_LATENCY  # benchmarked but all failed
+
+    BENCHMARK_FAIL_LATENCY = 300.0  # penalty latency for models that failed all benchmark prompts
 
     def get_all_benchmark_latencies(self) -> dict[str, float]:
-        """Single query: latest successful benchmark avg_latency keyed by model_id."""
+        """Single query: latest benchmark latency keyed by model_id.
+        Returns real avg latency for successes, BENCHMARK_FAIL_LATENCY for all-failed models."""
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT model_id, AVG(latency) as avg_latency
+                SELECT model_id,
+                       SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successes,
+                       AVG(CASE WHEN status = 'success' THEN latency END) as avg_latency
                 FROM benchmark_results
-                WHERE status = 'success' AND latency IS NOT NULL
-                  AND run_id = (
-                      SELECT run_id FROM benchmark_results
-                      ORDER BY created_at DESC LIMIT 1
-                  )
+                WHERE run_id = (
+                    SELECT run_id FROM benchmark_results
+                    ORDER BY created_at DESC LIMIT 1
+                )
                 GROUP BY model_id
                 """
             ).fetchall()
-            return {r["model_id"]: float(r["avg_latency"]) for r in rows if r["avg_latency"] is not None}
+            result = {}
+            for r in rows:
+                if r["successes"] and r["successes"] > 0 and r["avg_latency"] is not None:
+                    result[r["model_id"]] = float(r["avg_latency"])
+                else:
+                    result[r["model_id"]] = self.BENCHMARK_FAIL_LATENCY
+            return result
 
     def get_benchmark_results_summary(self) -> list[dict]:
         """Latest benchmark results grouped by model."""
