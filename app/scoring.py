@@ -11,10 +11,6 @@ QUALITY_WEIGHT = 0.3
 SPEED_WEIGHT = 0.45
 COST_WEIGHT = 0.25
 
-# Quality floor: don't route to consistently broken models
-QUALITY_FLOOR_MIN_SAMPLES = 5
-QUALITY_FLOOR_THRESHOLD = 0.3
-
 
 def cold_start_score(model: dict[str, Any], *, benchmark_latency: float | None = None) -> float:
     """Score a model with no request history using metadata and optional benchmark data."""
@@ -63,10 +59,6 @@ def score_model(
         return cold_start_score(model, benchmark_latency=benchmark_latency)
 
     success_rate = float(stats.get("success_rate") or NEUTRAL_SCORE)
-
-    # Quality floor: don't route to consistently broken models
-    if sample_count >= QUALITY_FLOOR_MIN_SAMPLES and success_rate < QUALITY_FLOOR_THRESHOLD:
-        return 0.0
 
     # No successful requests yet — treat as cold-start (don't reward fast errors)
     if success_rate == 0.0:
