@@ -37,7 +37,7 @@ from .models_registry import model_registry
 from .oauth import create_oauth_client
 from .proxy import forward_chat_completion
 from .router import is_valid_chat_model
-from .backtest import backtest_scheduler, get_backtest_status, run_backtest
+from .backtest import backtest_scheduler, get_backtest_status, restore_run_state_from_db, run_backtest
 from .settings import settings_store
 
 load_dotenv()
@@ -49,7 +49,9 @@ async def lifespan(app: FastAPI):
     timeout = httpx.Timeout(connect=30.0, read=300.0, write=300.0, pool=300.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         app.state.http_client = client
-        # Auto-refresh models from OpenRouter on startup
+        # Restore last backtest run state from DB so dashboard isn't blank after restart
+        restore_run_state_from_db()
+        # Auto-refresh models from all providers on startup
         try:
             await model_registry.refresh(client)
         except Exception:

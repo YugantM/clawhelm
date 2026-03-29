@@ -48,6 +48,23 @@ def get_backtest_status() -> dict[str, Any]:
     return dict(_current_run)
 
 
+def restore_run_state_from_db() -> None:
+    """On startup, restore last run state from DB so the dashboard isn't blank."""
+    run_id = db.get_latest_run_id()
+    if not run_id:
+        return
+    done = db.get_benchmarked_model_ids(run_id)
+    summary = db.get_benchmark_results_summary()
+    # Treat as completed (we don't know if it was mid-run; scheduler will resume)
+    _current_run.update(
+        run_id=run_id,
+        status="completed",
+        total=len(summary) * len(BENCHMARK_PROMPTS),
+        completed=len(done) * len(BENCHMARK_PROMPTS),
+        last_completed_at=time.time(),
+    )
+
+
 # ── Core backtest logic ───────────────────────────────────────
 
 async def _send_benchmark(
@@ -106,22 +123,43 @@ async def run_backtest(client: httpx.AsyncClient, run_id: str | None = None) -> 
     if _current_run["status"] == "running":
         return _current_run["run_id"]
 
-    run_id = run_id or str(uuid.uuid4())[:12]
+    # Resume from an existing incomplete run if no explicit run_id given
+    if run_id is None:
+        existing_run_id = db.get_latest_run_id()
+        if existing_run_id:
+            already_done = db.get_benchmarked_model_ids(existing_run_id)
+            all_models = model_registry.get_available_models()
+            free_models = [m for m in all_models if m.get("is_free")][:MAX_MODELS_PER_RUN]
+            remaining = [m for m in free_models if m["model_id"] not in already_done]
+            if remaining:
+                run_id = existing_run_id
+                logger.info("Resuming run %s: %d/%d models already done, %d remaining",
+                            run_id, len(already_done), len(free_models), len(remaining))
+            else:
+                run_id = str(uuid.uuid4())[:12]
+        else:
+            run_id = str(uuid.uuid4())[:12]
+
     all_models = model_registry.get_available_models()
-    # Only benchmark free models to avoid spending credits
-    models = [m for m in all_models if m.get("is_free")][:MAX_MODELS_PER_RUN]
-    if not models:
+    # Only benchmark free models (Groq, Google, OpenRouter :free) — no credits spent
+    free_models = [m for m in all_models if m.get("is_free")][:MAX_MODELS_PER_RUN]
+    already_done = db.get_benchmarked_model_ids(run_id)
+    models = [m for m in free_models if m["model_id"] not in already_done]
+
+    if not free_models:
         logger.info("Backtest %s: no free models available, skipping", run_id)
         _current_run.update(run_id=run_id, status="completed", last_completed_at=time.time())
         return run_id
-    total_tasks = len(models) * len(BENCHMARK_PROMPTS)
+
+    total_tasks = len(free_models) * len(BENCHMARK_PROMPTS)
+    completed_so_far = len(already_done) * len(BENCHMARK_PROMPTS)
 
     _current_run.update(
-        run_id=run_id, status="running", total=total_tasks, completed=0,
+        run_id=run_id, status="running", total=total_tasks, completed=completed_so_far,
     )
 
-    logger.info("Backtest %s started: %d models x %d prompts = %d tasks",
-                run_id, len(models), len(BENCHMARK_PROMPTS), total_tasks)
+    logger.info("Backtest %s: %d free models total, %d already done, testing %d now",
+                run_id, len(free_models), len(already_done), len(models))
 
     try:
         for model in models:

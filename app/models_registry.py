@@ -239,7 +239,7 @@ class ModelRegistry:
             self._register_model(
                 model_id,
                 provider="groq",
-                is_free=False,
+                is_free=True,  # Groq is free (rate-limited, no cost per token)
                 source="fetched",
                 context_length=context_length,
                 display_name=str(item.get("id") or model_id),
@@ -275,7 +275,7 @@ class ModelRegistry:
             self._register_model(
                 model_id,
                 provider="google",
-                is_free=False,
+                is_free=True,  # Google AI Studio free tier
                 source="fetched",
                 context_length=int(item.get("context_window") or 32768),
                 display_name=model_id,

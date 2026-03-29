@@ -756,6 +756,23 @@ class Database:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def get_latest_run_id(self) -> str | None:
+        """Return the most recent run_id from benchmark_results."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT run_id FROM benchmark_results ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+            return row["run_id"] if row else None
+
+    def get_benchmarked_model_ids(self, run_id: str) -> set[str]:
+        """Return the set of model_ids already benchmarked in this run_id."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT model_id FROM benchmark_results WHERE run_id = ?",
+                (run_id,),
+            ).fetchall()
+            return {r["model_id"] for r in rows}
+
     def has_benchmark_data(self) -> bool:
         with self._connect() as connection:
             row = connection.execute(
