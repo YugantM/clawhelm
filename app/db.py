@@ -797,6 +797,15 @@ class Database:
             ).fetchone()
             return bool(row and row["cnt"] > 0)
 
+    def delete_logs_before(self, before_date: str) -> int:
+        """Delete logs with timestamp before before_date. Returns row count deleted."""
+        with self._connect() as connection:
+            cur = connection.execute(
+                "DELETE FROM logs WHERE timestamp < ?", (before_date,)
+            )
+            connection.commit()
+            return cur.rowcount
+
     def get_recent_logs(self, limit: int = 20) -> list[dict]:
         """Last N routing logs."""
         with self._connect() as connection:
