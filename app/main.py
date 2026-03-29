@@ -167,14 +167,11 @@ async def get_chat_models():
         if entry.get("is_free"):
             s += FREE_BONUS
         entry["_score"] = s
-        # Use the same blended latency that score_model() uses, so speed rank matches routing
+        # Speed score: use live latency once any data exists; benchmark only for cold-start
         _sample_count = int(stats.get("sample_count") or 0)
         _live_lat = float(stats.get("avg_latency") or 1.0)
-        if _sample_count >= 10:
-            _eff_lat = _live_lat  # enough live data — ignore benchmark
-        elif _sample_count > 0 and bench_lat:
-            _w = _sample_count / 10.0
-            _eff_lat = _w * _live_lat + (1 - _w) * bench_lat  # blend
+        if _sample_count > 0:
+            _eff_lat = _live_lat  # trust live data immediately
         elif bench_lat:
             _eff_lat = bench_lat  # cold-start — benchmark only
         else:

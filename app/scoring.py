@@ -66,12 +66,9 @@ def score_model(
 
     live_latency = max(float(stats.get("avg_latency") or 1.0), 0.001)
 
-    # Blend benchmark and live latency for models with few samples
-    if benchmark_latency is not None and benchmark_latency > 0 and sample_count < 10:
-        weight = sample_count / 10.0
-        latency = weight * live_latency + (1 - weight) * benchmark_latency
-    else:
-        latency = live_latency
+    # Once we have any live data, trust it — benchmark uses short prompts and
+    # underestimates real query latency significantly.
+    latency = live_latency
 
     cost = max(float(stats.get("avg_cost") or 0.0), 0.0)
     is_free = bool(model.get("is_free", False))

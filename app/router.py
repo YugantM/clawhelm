@@ -16,6 +16,7 @@ OPENROUTER_FREE_ROUTER = "openrouter/free"
 
 FREE_MODEL_BONUS = 0.03  # small tie-breaker, not enough to override quality/speed
 EXPLORATION_RATE = 0.10
+EXPLORATION_POOL_SIZE = 5   # explore within top N models only
 SCORE_CACHE_TTL = 60.0
 
 _score_cache: dict[str, tuple[float, float]] = {}  # model_id -> (score, timestamp)
@@ -105,11 +106,23 @@ def _score_and_rank(available_models: list[dict[str, Any]]) -> list[tuple[dict[s
     # Deduplicate: same base model from multiple providers -> keep best
     scored = _deduplicate_by_base_model(scored)
 
-    if len(scored) > 1 and random.random() < EXPLORATION_RATE:
-        explore_index = random.randint(1, len(scored) - 1)
-        explored = scored.pop(explore_index)
-        scored.insert(0, explored)
-        scored[0] = (scored[0][0], scored[0][1])
+    if len(scored) <= 1:
+        return scored
+
+    # Build exploration pool: top N + one ambassador per provider not yet represented
+    top_n = scored[:EXPLORATION_POOL_SIZE]
+    pool_providers = {m["provider"] for m, _ in top_n}
+    pool = list(top_n)
+    for m, s in scored[EXPLORATION_POOL_SIZE:]:
+        if m["provider"] not in pool_providers:
+            pool.append((m, s))
+            pool_providers.add(m["provider"])
+
+    if random.random() < EXPLORATION_RATE:
+        pool_index = random.randint(1, len(pool) - 1)
+        explored = pool[pool_index]
+        # Promote explored model to #1; preserve rest of ranked order
+        scored = [explored] + [x for x in scored if x is not explored]
 
     return scored
 
