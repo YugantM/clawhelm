@@ -246,12 +246,15 @@ async def backtest_results():
 @app.get("/admin/dashboard")
 async def admin_dashboard():
     """Admin dashboard: system health, recent logs, stats, scheduler status."""
+    recent_logs = await asyncio.to_thread(db.get_recent_logs, 20)
+    model_stats = await asyncio.to_thread(db.get_model_stats_summary)
+    benchmark_results = await asyncio.to_thread(db.get_benchmark_results_summary)
     return {
         "health": {"status": "ok", "service": "clawhelm"},
         "backtest_status": get_backtest_status(),
-        "recent_logs": db.get_recent_logs(limit=20),
-        "model_stats": db.get_model_stats_summary(),
-        "benchmark_results": db.get_benchmark_results_summary(),
+        "recent_logs": recent_logs,
+        "model_stats": model_stats,
+        "benchmark_results": benchmark_results,
     }
 
 
