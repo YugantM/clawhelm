@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
         "/refresh-models": proxyTarget,
         "/sessions": proxyTarget,
         "/backtest": proxyTarget,
+        "/admin": proxyTarget,
         "/v1": proxyTarget,
       },
     },

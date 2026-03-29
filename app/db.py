@@ -763,5 +763,39 @@ class Database:
             ).fetchone()
             return bool(row and row["cnt"] > 0)
 
+    def get_recent_logs(self, limit: int = 20) -> list[dict]:
+        """Last N routing logs."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    timestamp, selected_model, actual_model, provider, latency,
+                    status_code, fallback_used, routing_score, estimated_cost
+                FROM logs
+                ORDER BY timestamp DESC LIMIT {limit}
+                """
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_model_stats_summary(self) -> list[dict]:
+        """Summary stats for each model from live traffic."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    selected_model as model_id,
+                    COUNT(*) as sample_count,
+                    ROUND(SUM(CASE WHEN status_code < 400 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as success_rate,
+                    ROUND(AVG(latency), 3) as avg_latency,
+                    ROUND(AVG(estimated_cost), 6) as avg_cost,
+                    MIN(timestamp) as first_seen,
+                    MAX(timestamp) as last_seen
+                FROM logs
+                GROUP BY selected_model
+                ORDER BY sample_count DESC
+                """
+            ).fetchall()
+            return [dict(r) for r in rows]
+
 
 db = Database()

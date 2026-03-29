@@ -1060,6 +1060,61 @@ button, textarea, input, select { font: inherit; }
   color: var(--text-secondary);
 }
 
+/* ---- Admin Dashboard ---- */
+
+.admin-page {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  color: var(--text-primary);
+}
+
+.admin-page h1 {
+  font-size: 1.8rem;
+  margin-bottom: 24px;
+}
+
+.admin-page h2 {
+  font-size: 1.2rem;
+  margin-bottom: 12px;
+}
+
+.admin-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: 8px;
+}
+
+.admin-table th {
+  background: var(--bg-secondary);
+  padding: 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.admin-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-table tr:hover {
+  background: var(--bg-secondary);
+}
+
+.admin-page.error {
+  color: #ef4444;
+}
+
 /* ---- Responsive ---- */
 
 @media (max-width: 640px) {

@@ -15,6 +15,7 @@ import {
 import Chat from "./components/Chat";
 import LoginModal from "./components/LoginModal";
 import Sidebar from "./components/Sidebar";
+import Admin from "./pages/Admin";
 
 const HEALTH_POLL_MS = 10000;
 const SESSION_POLL_MS = 15000;
@@ -111,6 +112,7 @@ export default function App() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [authCheckDone, setAuthCheckDone] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [showAdmin, setShowAdmin] = useState(false);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
@@ -238,10 +240,14 @@ export default function App() {
         e.preventDefault();
         handleNewChat();
       }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "a") {
+        e.preventDefault();
+        setShowAdmin(!showAdmin);
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [showAdmin]);
 
   async function generateAndSetTitle(sessionId, userMessage, assistantMessage) {
     try {
@@ -414,12 +420,16 @@ export default function App() {
         ) : null}
 
         <main className="app-main">
-          <Chat
-            messages={messages}
-            pending={pendingChat}
-            onSend={handleSend}
-            currentUser={currentUser}
-          />
+          {showAdmin ? (
+            <Admin />
+          ) : (
+            <Chat
+              messages={messages}
+              pending={pendingChat}
+              onSend={handleSend}
+              currentUser={currentUser}
+            />
+          )}
         </main>
 
         <LoginModal

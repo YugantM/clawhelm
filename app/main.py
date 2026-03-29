@@ -243,6 +243,18 @@ async def backtest_results():
     return db.get_benchmark_results_summary()
 
 
+@app.get("/admin/dashboard")
+async def admin_dashboard():
+    """Admin dashboard: system health, recent logs, stats, scheduler status."""
+    return {
+        "health": await getHealth(),
+        "backtest_status": get_backtest_status(),
+        "recent_logs": db.get_recent_logs(limit=20),
+        "model_stats": db.get_model_stats_summary(),
+        "benchmark_results": db.get_benchmark_results_summary(),
+    }
+
+
 # OAuth endpoints
 @app.get("/auth/google/login")
 async def google_login(redirect_to: str | None = Query(None)):
