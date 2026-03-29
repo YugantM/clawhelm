@@ -71,6 +71,8 @@ class ModelRegistry:
     def _infer_provider(model_id: str) -> str:
         if model_id.startswith("openrouter/") or model_id.endswith(":free"):
             return "openrouter"
+        if model_id.startswith("groq/"):
+            return "groq"
         return "openai"
 
     def _register_model(
@@ -168,6 +170,8 @@ class ModelRegistry:
             for config in provider_registry.get_enabled():
                 if config.models_path and config.name == "openrouter":
                     await self._fetch_openrouter_models(client)
+                elif config.models_path and config.name == "groq":
+                    await self._fetch_groq_models(client)
             self._last_refresh_at = datetime.now(timezone.utc)
             return self.snapshot()
 
@@ -205,6 +209,36 @@ class ModelRegistry:
                 max_completion_tokens=int(top_provider.get("max_completion_tokens") or 0),
                 modality=str(architecture.get("modality") or "text->text"),
                 display_name=str(item.get("name") or model_id).replace(" (free)", ""),
+            )
+
+    async def _fetch_groq_models(self, client: httpx.AsyncClient) -> None:
+        from .providers import provider_registry
+        api_key = provider_registry.get_api_key("groq")
+        if not api_key:
+            return
+
+        base_url = provider_registry.get_base_url("groq")
+        try:
+            response = await client.get(f"{base_url}/models", headers={"authorization": f"Bearer {api_key}"})
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            return
+        data = payload.get("data", []) if isinstance(payload, dict) else []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            model_id = item.get("id")
+            if not isinstance(model_id, str):
+                continue
+            context_length = int(item.get("context_window") or 4096)
+            self._register_model(
+                model_id,
+                provider="groq",
+                is_free=False,
+                source="fetched",
+                context_length=context_length,
+                display_name=str(item.get("id") or model_id),
             )
 
     @staticmethod

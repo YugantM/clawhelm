@@ -85,3 +85,15 @@ provider_registry.register(ProviderConfig(
     enabled_default=True,
     supports_free=False,
 ))
+
+provider_registry.register(ProviderConfig(
+    name="groq",
+    base_url_env="GROQ_BASE_URL",
+    base_url_default="https://api.groq.com/openai/v1",
+    chat_path="/chat/completions",
+    models_path="/models",
+    api_key_env="GROQ_API_KEY",
+    enabled_env="ALLOW_GROQ_ROUTING",
+    enabled_default=True,
+    supports_free=False,
+))
