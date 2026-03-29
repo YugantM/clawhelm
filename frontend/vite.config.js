@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
         "/config": proxyTarget,
         "/refresh-models": proxyTarget,
         "/sessions": proxyTarget,
+        "/backtest": proxyTarget,
         "/v1": proxyTarget,
       },
     },
