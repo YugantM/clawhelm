@@ -841,8 +841,10 @@ class Database:
                 SELECT
                     selected_model as model_id,
                     COUNT(*) as sample_count,
-                    ROUND(SUM(CASE WHEN status_code < 400 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as success_rate,
-                    ROUND(AVG(latency), 3) as avg_latency,
+                    ROUND(SUM(CASE WHEN status_code < 400 AND (fallback_used = 0 OR fallback_used IS NULL)
+                                   THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as success_rate,
+                    ROUND(AVG(CASE WHEN fallback_used = 0 OR fallback_used IS NULL
+                                   THEN latency END), 3) as avg_latency,
                     ROUND(AVG(estimated_cost), 6) as avg_cost,
                     MIN(timestamp) as first_seen,
                     MAX(timestamp) as last_seen

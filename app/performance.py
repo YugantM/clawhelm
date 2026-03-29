@@ -33,14 +33,17 @@ def get_model_stats(model_id: str) -> dict[str, float | int]:
             """
             SELECT
                 COUNT(*) AS total_count,
-                SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END) AS success_count,
-                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN latency END) AS avg_latency,
-                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN estimated_cost END) AS avg_cost
+                SUM(CASE WHEN status_code >= 200 AND status_code < 400
+                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN 1 ELSE 0 END) AS success_count,
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400
+                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN latency END) AS avg_latency,
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400
+                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN estimated_cost END) AS avg_cost
             FROM logs
-            WHERE (actual_model = ? OR selected_model = ?)
+            WHERE selected_model = ?
               AND timestamp > datetime('now', ? || ' days')
             """,
-            (model_id, model_id, f"-{STATS_WINDOW_DAYS}"),
+            (model_id, f"-{STATS_WINDOW_DAYS}"),
         ).fetchone()
 
     total_count = row["total_count"] if row and row["total_count"] else 0
@@ -62,14 +65,17 @@ def get_all_model_stats(days: int = STATS_WINDOW_DAYS) -> dict[str, dict]:
         rows = connection.execute(
             f"""
             SELECT
-                COALESCE(actual_model, selected_model) AS model_id,
+                selected_model AS model_id,
                 COUNT(*) AS total_count,
-                SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END) AS success_count,
-                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN latency END) AS avg_latency,
-                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN estimated_cost END) AS avg_cost
+                SUM(CASE WHEN status_code >= 200 AND status_code < 400
+                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN 1 ELSE 0 END) AS success_count,
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400
+                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN latency END) AS avg_latency,
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400
+                          AND (fallback_used = 0 OR fallback_used IS NULL) THEN estimated_cost END) AS avg_cost
             FROM logs
             WHERE timestamp > datetime('now', '-{days} days')
-            GROUP BY COALESCE(actual_model, selected_model)
+            GROUP BY selected_model
             """
         ).fetchall()
     result: dict[str, dict] = {}
