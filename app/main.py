@@ -38,6 +38,7 @@ from .oauth import create_oauth_client
 from .proxy import forward_chat_completion
 from .router import is_valid_chat_model
 from .backtest import backtest_scheduler, get_backtest_status, restore_run_state_from_db, run_backtest
+from .router import invalidate_score_cache
 from .settings import settings_store
 
 load_dotenv()
@@ -251,8 +252,9 @@ async def refresh_models(request: Request):
 
 @app.delete("/admin/logs")
 async def clear_logs_before(before: str = Query(..., description="ISO date e.g. 2026-03-29")):
-    """Delete routing logs before the given date. Admin only."""
+    """Delete routing logs before the given date and invalidate score cache."""
     deleted = await asyncio.to_thread(db.delete_logs_before, before)
+    invalidate_score_cache()
     return {"deleted": deleted, "before": before}
 
 

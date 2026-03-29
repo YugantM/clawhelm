@@ -21,6 +21,10 @@ SCORE_CACHE_TTL = 60.0
 _score_cache: dict[str, tuple[float, float]] = {}  # model_id -> (score, timestamp)
 
 
+def invalidate_score_cache() -> None:
+    _score_cache.clear()
+
+
 @dataclass(slots=True)
 class RouteDecision:
     model: str
