@@ -380,6 +380,14 @@ export default function App() {
           </svg>
         </button>
         <div className="rail-spacer" />
+        {currentUser?.email === "hadiyalyugant@gmail.com" && (
+          <button type="button" className={`rail-btn${showAdmin ? " rail-btn--active" : ""}`} onClick={() => setShowAdmin(!showAdmin)} title="Admin dashboard" aria-label="Admin dashboard">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.4"/>
+              <path d="M9 6v3l2 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+            </svg>
+          </button>
+        )}
         {currentUser ? (
           <button type="button" className="rail-btn rail-btn--avatar" onClick={() => setSidebarOpen(!sidebarOpen)} title={currentUser.name || "Profile"}>
             {currentUser.avatar_url ? (
