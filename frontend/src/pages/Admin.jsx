@@ -31,13 +31,18 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [tab, setTab] = useState("routing");
+  const [allModels, setAllModels] = useState([]);
 
   useEffect(() => {
     const fetchDashboard = async () => {
       try {
-        const res = await fetch("/admin/dashboard");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setDashboard(await res.json());
+        const [dashRes, modelsRes] = await Promise.all([
+          fetch("/admin/dashboard"),
+          fetch("/chat/models"),
+        ]);
+        if (!dashRes.ok) throw new Error(`HTTP ${dashRes.status}`);
+        setDashboard(await dashRes.json());
+        if (modelsRes.ok) setAllModels(await modelsRes.json());
         setError(null);
       } catch (err) {
         setError(err.message);
@@ -98,12 +103,65 @@ export default function Admin() {
 
       {/* Tabs */}
       <div className="admin-tabs">
-        {["routing", "benchmark", "logs"].map(t => (
+        {["routing", "all", "benchmark", "logs"].map(t => (
           <button key={t} className={`admin-tab${tab === t ? " admin-tab--active" : ""}`} onClick={() => setTab(t)}>
-            {t === "routing" ? "Live Routing" : t === "benchmark" ? "Benchmarks" : "Recent Logs"}
+            {t === "routing" ? "Live Routing" : t === "all" ? `All Models (${allModels.filter(m=>m.model_id).length})` : t === "benchmark" ? "Benchmarks" : "Recent Logs"}
           </button>
         ))}
       </div>
+
+      {tab === "all" && (() => {
+        const statsMap = Object.fromEntries(model_stats.map(m => [m.model_id, m]));
+        const benchMap = Object.fromEntries(benchmark_results.map(b => [b.model_id, b]));
+        const [sortBy, setSortBy] = [null, () => {}]; // static sort by rank
+        const models = allModels.filter(m => m.model_id).sort((a, b) => (a.rank || 999) - (b.rank || 999));
+        return (
+          <section className="admin-card">
+            <h2>All Available Models — {models.length} in pool</h2>
+            <div style={{ fontSize: "0.78rem", color: "var(--text-tertiary)", marginBottom: 12 }}>
+              Sorted by routing rank. Green = has live data. Blue = benchmarked.
+            </div>
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Model</th>
+                  <th>Free</th>
+                  <th>Context</th>
+                  <th>Live Req</th>
+                  <th>Live Success</th>
+                  <th>Live Latency</th>
+                  <th>Bench Latency</th>
+                </tr>
+              </thead>
+              <tbody>
+                {models.map((m, i) => {
+                  const live = statsMap[m.model_id];
+                  const bench = benchMap[m.model_id];
+                  return (
+                    <tr key={i} style={{ opacity: live ? 1 : 0.6 }}>
+                      <td style={{ color: "var(--text-tertiary)", fontSize: "0.75rem" }}>{m.rank || "—"}</td>
+                      <td style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
+                        {live && <span style={{ color: "#22c55e", marginRight: 4 }}>●</span>}
+                        {bench?.successes > 0 && <span style={{ color: "#3b82f6", marginRight: 4 }}>●</span>}
+                        {m.model_id}
+                      </td>
+                      <td>{m.is_free ? <span style={{ color: "#22c55e" }}>free</span> : "—"}</td>
+                      <td style={{ fontSize: "0.75rem" }}>{m.context_length ? `${Math.round(m.context_length/1000)}k` : "—"}</td>
+                      <td>{live ? live.sample_count : "—"}</td>
+                      <td style={{ color: live ? (live.success_rate >= 90 ? "#22c55e" : live.success_rate >= 70 ? "#fbbf24" : "#ef4444") : "var(--text-tertiary)" }}>
+                        {live ? `${live.success_rate}%` : "no data"}
+                      </td>
+                      <td>{live ? `${live.avg_latency.toFixed(2)}s` : "—"}</td>
+                      <td style={{ color: "#3b82f6" }}>{bench?.avg_latency ? `${bench.avg_latency.toFixed(2)}s` : bench?.successes === 0 ? <span style={{ color: "#ef4444" }}>failed</span> : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </section>
+        );
+      })()}
 
       {tab === "routing" && (
         <section className="admin-card">
