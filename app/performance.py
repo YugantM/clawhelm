@@ -56,6 +56,37 @@ def get_model_stats(model_id: str) -> dict[str, float | int]:
     }
 
 
+def get_all_model_stats(days: int = STATS_WINDOW_DAYS) -> dict[str, dict]:
+    """Single query returning stats for all models seen in the window."""
+    with _connect() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT
+                COALESCE(actual_model, selected_model) AS model_id,
+                COUNT(*) AS total_count,
+                SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END) AS success_count,
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN latency END) AS avg_latency,
+                AVG(CASE WHEN status_code >= 200 AND status_code < 400 THEN estimated_cost END) AS avg_cost
+            FROM logs
+            WHERE timestamp > datetime('now', '-{days} days')
+            GROUP BY COALESCE(actual_model, selected_model)
+            """
+        ).fetchall()
+    result: dict[str, dict] = {}
+    for row in rows:
+        total = row["total_count"] or 0
+        if total == 0:
+            continue
+        success = row["success_count"] or 0
+        result[row["model_id"]] = {
+            "success_rate": round(success / total, 6),
+            "avg_latency": float(row["avg_latency"] or NEUTRAL_STATS["avg_latency"]),
+            "avg_cost": float(row["avg_cost"] or 0.0),
+            "sample_count": total,
+        }
+    return result
+
+
 def get_successful_models(*, include_all: bool = False) -> list[dict[str, Any]]:
     with _connect() as connection:
         rows = connection.execute(

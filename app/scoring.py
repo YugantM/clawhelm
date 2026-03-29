@@ -26,7 +26,7 @@ def cold_start_score(model: dict[str, Any], *, benchmark_latency: float | None =
         cost_score = 0.5  # no pricing data, neutral
     else:
         cost_per_million = prompt_cost * 1_000_000
-        cost_score = min(1.0 / max(cost_per_million, 0.01), 1.0)
+        cost_score = 1.0 / (cost_per_million + 1.0)  # safe: 0→1.0, 1→0.5, 10→0.09
 
     free_bonus = 0.1 if is_free else 0.0
     context_bonus = 0.02 if context_length >= 128_000 else 0.0
@@ -88,7 +88,7 @@ def score_model(
     elif cost <= 0:
         cost_score = 0.5  # no cost data tracked, don't reward as free
     else:
-        cost_score = min(1.0 / (cost * 100 + 1), 1.0)
+        cost_score = 1.0 / (cost * 100_000 + 1.0)  # cost is per-request dollars; scale to per-million
 
     score = (
         success_rate * QUALITY_WEIGHT
@@ -104,13 +104,13 @@ def dimension_scores(model: dict[str, Any]) -> dict[str, float]:
     is_free = model.get("is_free", False)
 
     # Cost dimension: cheaper = higher score
-    if prompt_cost <= 0:
+    if is_free:
         cost_score = 1.0
+    elif prompt_cost <= 0:
+        cost_score = 0.5
     else:
         cost_per_million = prompt_cost * 1_000_000
-        cost_score = min(1.0 / max(cost_per_million, 0.01), 1.0)
-    if is_free:
-        cost_score += 0.1
+        cost_score = 1.0 / (cost_per_million + 1.0)
 
     # Speed dimension: cold-start neutral (no live data available at listing time)
     speed_score = NEUTRAL_SCORE

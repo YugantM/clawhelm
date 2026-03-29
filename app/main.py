@@ -132,28 +132,51 @@ async def chat(request: Request, payload: ChatRequest):
 @app.get("/chat/models", response_model=list[ChatModelOption])
 async def get_chat_models():
     from .providers import provider_registry
-    from .scoring import dimension_scores
+    from .performance import get_all_model_stats, NEUTRAL_STATS
+    from .scoring import score_model, cold_start_score
 
     available = model_registry.get_available_models()
 
-    # Collect non-auto models with their dimension scores
+    # Batch-fetch live stats and benchmark latencies (2 queries total)
+    all_stats = await asyncio.to_thread(get_all_model_stats)
+    bench_latencies = await asyncio.to_thread(db.get_all_benchmark_latencies)
+
+    # Collect non-auto models with their real scores
     model_entries: list[dict] = []
 
     # Free models — always shown
     for m in available:
         if m.get("is_free"):
-            model_entries.append({**m, "group": "free", "_dim": dimension_scores(m)})
+            model_entries.append({**m, "group": "free"})
 
     # Paid models — show if any provider with an API key is enabled
     has_provider = any(provider_registry.is_enabled(name) for name in provider_registry.all_names())
     if has_provider:
         for m in available:
             if not m.get("is_free"):
-                model_entries.append({**m, "group": "paid", "_dim": dimension_scores(m)})
+                model_entries.append({**m, "group": "paid"})
+
+    # Score each model using the same formula as the router
+    FREE_BONUS = 0.03
+    for entry in model_entries:
+        mid = entry["model_id"]
+        stats = all_stats.get(mid, dict(NEUTRAL_STATS))
+        bench_lat = bench_latencies.get(mid)
+        s = score_model(entry, stats, benchmark_latency=bench_lat)
+        if entry.get("is_free"):
+            s += FREE_BONUS
+        entry["_score"] = s
+        entry["_speed_score"] = (1.0 / max(bench_lat, 0.1) / 10.0) if bench_lat else (
+            1.0 / max(float(stats.get("avg_latency") or 1.0), 0.1) / 10.0
+            if stats.get("sample_count", 0) > 0 else 0.5
+        )
+        entry["_quality_score"] = float(stats.get("success_rate") or 0.5)
+        cost = float(stats.get("avg_cost") or 0.0)
+        entry["_cost_score"] = 1.0 if entry.get("is_free") else (0.5 if cost <= 0 else min(1.0 / (cost * 100 + 1), 1.0))
 
     # Assign ranks per dimension (1-indexed, higher score = lower rank number)
-    for dim_key in ("overall", "speed", "quality", "cost"):
-        sorted_by_dim = sorted(model_entries, key=lambda e: e["_dim"][dim_key], reverse=True)
+    for dim_key, field in (("overall", "_score"), ("speed", "_speed_score"), ("quality", "_quality_score"), ("cost", "_cost_score")):
+        sorted_by_dim = sorted(model_entries, key=lambda e: e[field], reverse=True)
         for i, entry in enumerate(sorted_by_dim):
             rank_field = "rank" if dim_key == "overall" else f"rank_by_{dim_key}"
             entry[rank_field] = i + 1

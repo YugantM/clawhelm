@@ -736,6 +736,23 @@ class Database:
             ).fetchone()
             return row["avg_latency"] if row and row["avg_latency"] is not None else None
 
+    def get_all_benchmark_latencies(self) -> dict[str, float]:
+        """Single query: latest successful benchmark avg_latency keyed by model_id."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT model_id, AVG(latency) as avg_latency
+                FROM benchmark_results
+                WHERE status = 'success' AND latency IS NOT NULL
+                  AND run_id = (
+                      SELECT run_id FROM benchmark_results
+                      ORDER BY created_at DESC LIMIT 1
+                  )
+                GROUP BY model_id
+                """
+            ).fetchall()
+            return {r["model_id"]: float(r["avg_latency"]) for r in rows if r["avg_latency"] is not None}
+
     def get_benchmark_results_summary(self) -> list[dict]:
         """Latest benchmark results grouped by model."""
         with self._connect() as connection:
