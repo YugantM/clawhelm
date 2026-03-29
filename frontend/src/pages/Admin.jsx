@@ -347,23 +347,48 @@ export default function Admin() {
         function handleBSort(col) {
           setBSort(prev => ({ col, dir: prev.col === col && prev.dir === "asc" ? "desc" : "asc" }));
         }
-        let rows = [...benchmarkPassed_list].sort((a, b) => {
-          let av, bv;
-          switch (bSort.col) {
-            case "model": av = a.model_id; bv = b.model_id; break;
-            case "passed": av = a.successes; bv = b.successes; break;
-            case "bench_latency": av = a.avg_latency; bv = b.avg_latency; break;
-            default: av = a.avg_latency; bv = b.avg_latency;
+        // All results: passed first (by latency asc), then failed at bottom
+        let rows = [...benchmark_results].sort((a, b) => {
+          const aFailed = !a.avg_latency;
+          const bFailed = !b.avg_latency;
+          if (bSort.col === "model") {
+            const cmp = a.model_id < b.model_id ? -1 : a.model_id > b.model_id ? 1 : 0;
+            return bSort.dir === "asc" ? cmp : -cmp;
           }
-          if (av < bv) return bSort.dir === "asc" ? -1 : 1;
-          if (av > bv) return bSort.dir === "asc" ? 1 : -1;
-          return 0;
+          if (bSort.col === "passed") {
+            const cmp = a.successes - b.successes;
+            return bSort.dir === "asc" ? cmp : -cmp;
+          }
+          // Default / bench_latency: failed models always last
+          if (aFailed !== bFailed) return aFailed ? 1 : -1;
+          const cmp = (a.avg_latency ?? 999) - (b.avg_latency ?? 999);
+          return bSort.dir === "asc" ? cmp : -cmp;
         });
+        const isRunning = backtest_status?.status === "running";
+        const currentModel = backtest_status?.current_model;
         return (
           <section className="admin-card">
             <h2>Benchmark Results — Free Models Only</h2>
+
+            {/* Live progress bar */}
+            {isRunning && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", marginBottom: 4 }}>
+                  <span>Testing: <code style={{ color: "#fbbf24" }}>{currentModel || "…"}</code></span>
+                  <span style={{ color: "var(--text-tertiary)" }}>{backtest_status.completed}/{backtest_status.total}</span>
+                </div>
+                <div style={{ height: 6, background: "var(--border)", borderRadius: 3 }}>
+                  <div style={{
+                    height: "100%", borderRadius: 3, background: "#3b82f6",
+                    width: `${Math.round((backtest_status.completed / Math.max(backtest_status.total, 1)) * 100)}%`,
+                    transition: "width 0.4s ease",
+                  }} />
+                </div>
+              </div>
+            )}
+
             {rows.length === 0 ? (
-              <p style={{ color: "var(--text-tertiary)" }}>No successful benchmark results yet.</p>
+              <p style={{ color: "var(--text-tertiary)" }}>No benchmark results yet. Run a backtest to populate this table.</p>
             ) : (
               <table className="admin-table">
                 <thead>
@@ -375,20 +400,27 @@ export default function Admin() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((b, i) => (
-                    <tr key={i}>
-                      <td style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>{b.model_id}</td>
-                      <td>
-                        <span style={{ color: b.successes === 3 ? "#22c55e" : "#fbbf24" }}>
-                          {b.successes}/{b.tests}
-                        </span>
-                      </td>
-                      <td>{b.avg_latency.toFixed(2)}s</td>
-                      <td style={{ width: 160 }}>
-                        <Bar value={maxLatency - b.avg_latency} max={maxLatency} color="#22c55e" />
-                      </td>
-                    </tr>
-                  ))}
+                  {rows.map((b, i) => {
+                    const isCurrent = currentModel === b.model_id;
+                    const failed = b.successes === 0;
+                    return (
+                      <tr key={i} style={{ background: isCurrent ? "rgba(251,191,36,0.08)" : undefined }}>
+                        <td style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+                          {isCurrent && <span style={{ color: "#fbbf24", marginRight: 4 }}>▶</span>}
+                          {b.model_id}
+                        </td>
+                        <td>
+                          <span style={{ color: b.successes === b.tests ? "#22c55e" : b.successes > 0 ? "#fbbf24" : "#ef4444" }}>
+                            {b.successes}/{b.tests}
+                          </span>
+                        </td>
+                        <td>{failed ? <span style={{ color: "#ef4444" }}>failed</span> : `${b.avg_latency.toFixed(2)}s`}</td>
+                        <td style={{ width: 160 }}>
+                          {!failed && <Bar value={maxLatency - b.avg_latency} max={maxLatency} color="#22c55e" />}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}

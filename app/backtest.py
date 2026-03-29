@@ -41,6 +41,7 @@ _current_run: dict[str, Any] = {
     "total": 0,
     "completed": 0,
     "last_completed_at": None,
+    "current_model": None,  # model currently being benchmarked
 }
 
 
@@ -165,6 +166,7 @@ async def run_backtest(client: httpx.AsyncClient, run_id: str | None = None) -> 
         for model in models:
             model_id = model["model_id"]
             provider_name = model.get("provider", "openrouter")
+            _current_run["current_model"] = model_id
 
             for category, prompt_text in BENCHMARK_PROMPTS.items():
                 result = await _send_benchmark(
@@ -189,11 +191,13 @@ async def run_backtest(client: httpx.AsyncClient, run_id: str | None = None) -> 
 
         _current_run["status"] = "completed"
         _current_run["last_completed_at"] = time.time()
+        _current_run["current_model"] = None
         logger.info("Backtest %s completed: %d/%d", run_id,
                      _current_run["completed"], total_tasks)
 
     except Exception as exc:
         _current_run["status"] = "failed"
+        _current_run["current_model"] = None
         logger.error("Backtest %s failed: %s", run_id, exc)
 
     return run_id
