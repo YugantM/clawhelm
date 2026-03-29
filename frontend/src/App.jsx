@@ -380,7 +380,7 @@ export default function App() {
           </svg>
         </button>
         <div className="rail-spacer" />
-        {currentUser?.email === "hadiyalyugant@gmail.com" && (
+        {currentUser?.email?.toLowerCase() === "hadiyalyugant@gmail.com" && (
           <button type="button" className={`rail-btn${showAdmin ? " rail-btn--active" : ""}`} onClick={() => setShowAdmin(!showAdmin)} title="Admin dashboard" aria-label="Admin dashboard">
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
               <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.4"/>
@@ -430,7 +430,7 @@ export default function App() {
         ) : null}
 
         <main className="app-main">
-          {showAdmin && currentUser?.email === "hadiyalyugant@gmail.com" ? (
+          {showAdmin && currentUser?.email?.toLowerCase() === "hadiyalyugant@gmail.com" ? (
             <Admin />
           ) : (
             <Chat
