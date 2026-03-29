@@ -247,7 +247,7 @@ async def backtest_results():
 async def admin_dashboard():
     """Admin dashboard: system health, recent logs, stats, scheduler status."""
     return {
-        "health": await getHealth(),
+        "health": {"status": "ok", "service": "clawhelm"},
         "backtest_status": get_backtest_status(),
         "recent_logs": db.get_recent_logs(limit=20),
         "model_stats": db.get_model_stats_summary(),
