@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 
+const API_BASE = import.meta.env.DEV ? "" : (import.meta.env.VITE_API_BASE_URL || "");
+
 function Bar({ value, max, color = "#3b82f6" }) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   return (
@@ -37,8 +39,8 @@ export default function Admin() {
     const fetchDashboard = async () => {
       try {
         const [dashRes, modelsRes] = await Promise.all([
-          fetch("/admin/dashboard"),
-          fetch("/chat/models"),
+          fetch(`${API_BASE}/admin/dashboard`),
+          fetch(`${API_BASE}/chat/models`),
         ]);
         if (!dashRes.ok) throw new Error(`HTTP ${dashRes.status}`);
         setDashboard(await dashRes.json());
