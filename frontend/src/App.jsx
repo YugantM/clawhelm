@@ -242,7 +242,9 @@ export default function App() {
       }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "a") {
         e.preventDefault();
-        setShowAdmin(!showAdmin);
+        if (currentUser?.email === "hadiyalyugant@gmail.com") {
+          setShowAdmin(!showAdmin);
+        }
       }
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -420,7 +422,7 @@ export default function App() {
         ) : null}
 
         <main className="app-main">
-          {showAdmin ? (
+          {showAdmin && currentUser?.email === "hadiyalyugant@gmail.com" ? (
             <Admin />
           ) : (
             <Chat
